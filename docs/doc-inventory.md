@@ -4,8 +4,8 @@
 
 | Path | Size (bytes) | Type |
 |------|-------------:|------|
-| AGENTS.md | 14056 | file |
-| README.md | 30860 | file |
+| AGENTS.md | 14268 | file |
+| README.md | 30954 | file |
 | docs/adr | — | dir |
 | docs/adr/ADR-001-singleton-registry-unification.md | 4740 | file |
 | docs/adr/ADR-002-hitl-decision-layer-decoupling.md | 4999 | file |
@@ -28,7 +28,7 @@
 | docs/dev/developer-guide.md | 25737 | file |
 | docs/dev/evaluation-matrix-principles.md | 39285 | file |
 | docs/dev/forward-compat.md | 12884 | file |
-| docs/dev/founder-expectations.md | 111669 | file |
+| docs/dev/founder-expectations.md | 111745 | file |
 | docs/dev/gate-failure-modes.md | 21304 | file |
 | docs/dev/override-reference.md | 9343 | file |
 | docs/dev/project-evaluation-2026-09-06.md | 3219 | file |
@@ -45,7 +45,7 @@
 | docs/user | — | dir |
 | docs/user/api-reference.md | 13644 | file |
 | docs/user/asset-library.md | 11894 | file |
-| docs/user/cli-reference.md | 22226 | file |
+| docs/user/cli-reference.md | 22754 | file |
 | docs/user/deployment.md | 8225 | file |
 | docs/user/hitl-framework.md | 6928 | file |
 | docs/user/mcp-setup.md | 23840 | file |
