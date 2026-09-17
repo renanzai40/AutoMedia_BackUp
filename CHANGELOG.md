@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.7.0](https://github.com/renanzai40/AutoMedia_BackUp/compare/automedia-v1.6.0...automedia-v1.7.0) (2026-09-17)
+
+
+### Features
+
+* **brand:** feed cta_principles to the content-writer gate ([11b8c54](https://github.com/renanzai40/AutoMedia_BackUp/commit/11b8c54ca8b77596e7e7ce01bcccbd034032ccd9))
+* **brand:** let add_brand set gate-consumed fields ([52eaea7](https://github.com/renanzai40/AutoMedia_BackUp/commit/52eaea7e81c616ecde1ff1fbd8ea7d523701ddf9))
+* **cli:** add --skip-review for unattended runs ([71631f0](https://github.com/renanzai40/AutoMedia_BackUp/commit/71631f0d0a62029a1f1cbf38926d9125d4187b44))
+* **lifecycle:** gate distribution on L3 ([615cced](https://github.com/renanzai40/AutoMedia_BackUp/commit/615cced93809595fd7eb4b8bbd9a3d6e9a29967d))
+* **lifecycle:** gate the archive entry points on L2 ([f4ff3e9](https://github.com/renanzai40/AutoMedia_BackUp/commit/f4ff3e95a081a5e83e18acaba27b1a54826b7264))
+* **lifecycle:** produce publish_log and gate publishing on L1 ([0eaf429](https://github.com/renanzai40/AutoMedia_BackUp/commit/0eaf4297715369c2767301c20ff31e00122749ea))
+* **mcp:** add authenticated HTTP transport and a working allowlist override ([33d1d03](https://github.com/renanzai40/AutoMedia_BackUp/commit/33d1d031f29d18d6d8e5c5c1db3e44ca96d2c898))
+* **mcp:** persist topic pool by default ([aecfef4](https://github.com/renanzai40/AutoMedia_BackUp/commit/aecfef4ec26ad4e628c259ebec1898f1137c6932))
+* **pipeline:** produce the video track before the V gates and report skipped honestly ([380d2fd](https://github.com/renanzai40/AutoMedia_BackUp/commit/380d2fd8ee2e066f46ee6ddd3b64cb7df106db23))
+* **report:** add remediation column to gate-report ([7ae61b9](https://github.com/renanzai40/AutoMedia_BackUp/commit/7ae61b93f4307c52b7b2c7be362676e48a44eb61))
+* **report:** self-contained HTML gate report ([16c149b](https://github.com/renanzai40/AutoMedia_BackUp/commit/16c149b863384973c7e338b6434faa9fdbd0d1b0))
+* **topics:** persist research_topics into the pool ([e0b8224](https://github.com/renanzai40/AutoMedia_BackUp/commit/e0b82249e099474ff5840ae5b0534433af47e5a5))
+
+
+### Bug Fixes
+
+* **brand:** read the correct aliases key ([dfeb8be](https://github.com/renanzai40/AutoMedia_BackUp/commit/dfeb8becf31bea2978cdc2929ac3e529c85c491b))
+* **cli:** non-zero exit on gate failure ([a1e2f67](https://github.com/renanzai40/AutoMedia_BackUp/commit/a1e2f6763ca8a2411f345b7947b6eb77b4b6275b))
+* **cron:** --due dispatch and fire pool bridge ([8dfe128](https://github.com/renanzai40/AutoMedia_BackUp/commit/8dfe128da03cf7e2e5003bd57efd5cdb4ea9cd1f))
+* **doctor:** bounded LLM probe; stop the false-positive ([81491aa](https://github.com/renanzai40/AutoMedia_BackUp/commit/81491aa579c9eab3f3d059a0c102f1813b9bb562))
+* **lifecycle:** real source_lang + advisory L4 in MCP localize ([398daea](https://github.com/renanzai40/AutoMedia_BackUp/commit/398daeaf41628d6d471b4f6bffe5862e8221c6af))
+* **mcp:** make the tool layer importable and installable on Windows ([2f764d3](https://github.com/renanzai40/AutoMedia_BackUp/commit/2f764d350c4d466e6196255eb95f020caaa88ae1))
+* **pool:** close SQLite connections so Windows teardown stops locking ([07679df](https://github.com/renanzai40/AutoMedia_BackUp/commit/07679dfb7cd5bcd3c2b77d075f9659afbd02823a))
+* **report:** keep remediation fields in gate-report ([be8c8c8](https://github.com/renanzai40/AutoMedia_BackUp/commit/be8c8c819bf363b58822bfa3989043ebaab6dd87))
+* **runner:** align production presets with producible inputs ([beb80cc](https://github.com/renanzai40/AutoMedia_BackUp/commit/beb80cc208f3c2bb3f210edeb1a725ee840b511a))
+
+
+### Documentation
+
+* correct founder-expectations collection claims ([fd9a52f](https://github.com/renanzai40/AutoMedia_BackUp/commit/fd9a52fd4c5e6a256c48a19e9a831e6d78fcc431))
+* correct publish_log path to 06_publish ([b11b132](https://github.com/renanzai40/AutoMedia_BackUp/commit/b11b1329560b266325248fb4b6a51651bb646404))
+
 ## [1.6.0](https://github.com/renanzai40/AutoMedia_BackUp/compare/automedia-v1.5.0...automedia-v1.6.0) (2026-09-14)
 
 
