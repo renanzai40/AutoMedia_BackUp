@@ -1261,10 +1261,64 @@ class TestVideoModeStatusDowngrade:
             )
 
     def test_qa_only_and_repurpose_are_not_video_producing(self) -> None:
-        """边界：含 V 门但无视频产出阶段的模式不得进入欠视频集合。"""
+        """边界：``qa_only`` / ``repurpose`` 从不跑视频阶段，故不得欠视频。
+
+        中文说明：这两个模式的预设含 V 门，但从不进入 ``_produce_video_track``
+        （runner.py 的媒体阶段只对 ``mode == "auto"`` 或
+        ``_VIDEO_PRODUCING_MODES`` 调用它），所以要求它们产出视频会把每次运行
+        都误判为 incomplete。
+
+        ``auto`` 被排除是**另一个**理由，不能与上面两条混为一谈：``auto``
+        确实会跑视频阶段。排除它是因为 ``auto`` 同时是「用户没有指定模式」的默认值
+        和「平台含视频优先/混合社交时自动推导出的模式」，仅凭模式字符串无法区分
+        「这次欠视频」与「这次没要求视频」——12 个纯文本平台（微信/知乎/推特等）
+        走的是 ``text_only``，而自动推导到 ``auto`` 的 8 个平台（YouTube/抖音/
+        小红书等）是欠视频的。把 ``auto`` 加进集合会让纯文本用户的运行变成退出码 1。
+
+        加它之前先解决「是否欠视频」这个独立信号；本断言记录的是当前契约，不是
+        对 ``auto`` 缺乏视频阶段的描述。
+        """
         assert "qa_only" not in _VIDEO_PRODUCING_MODES
         assert "repurpose" not in _VIDEO_PRODUCING_MODES
         assert "auto" not in _VIDEO_PRODUCING_MODES
+
+    def test_owes_video_covers_auto_only_when_derived_from_multimedia(self) -> None:
+        """The four cases that decide the success -> partial downgrade (#152).
+
+        中文说明：``mode`` 字符串本身回答不了「这次是否欠视频」——``auto`` 既是
+        媒体阶段的执行条件，也是未指定模式时的默认值。``owes_video`` 因此改用
+        「``auto`` 是否由多媒体平台推导而来」来判断，判据复用
+        ``_derive_mode_from_platforms``，与实际推导逻辑不会脱钩。
+        """
+        cases = [
+            # (mode, platforms, owes_video, why)
+            ("video_only", [], True, "video-producing mode owes a video outright"),
+            ("short-video", [], True, "video-producing mode owes a video outright"),
+            ("auto", ["youtube"], True, "auto derived from a video-first platform"),
+            ("auto", ["xiaohongshu"], True, "auto derived from a mixed-social platform"),
+            ("auto", ["wechat", "zhihu"], False, "auto over text-first targets owes nothing"),
+            ("auto", [], False, "no platforms -> intent ambiguous, do not downgrade"),
+        ]
+        for mode, platforms, expected, why in cases:
+            owes = mode in _VIDEO_PRODUCING_MODES or (
+                mode == "auto"
+                and bool(platforms)
+                and _derive_mode_from_platforms(platforms) == "auto"
+            )
+            assert owes is expected, f"{mode} + {platforms}: {why}"
+
+    def test_attempts_video_is_a_superset_of_owes_video(self) -> None:
+        """The media stage attempts video for a superset of the owing modes.
+
+        中文说明：``_produce_video_track`` 对 ``auto`` 与整个
+        ``_VIDEO_PRODUCING_MODES`` 都会调用，所以「尝试产出」多于「欠视频」。
+        正因为这个超集存在，才不能把降级条件写成模式集合成员判定——那会让
+        「尝试了但本不欠视频」的 ``auto`` 运行（纯文本目标）被误降级。
+        """
+        attempts = {"auto", *_VIDEO_PRODUCING_MODES}
+        owes = set(_VIDEO_PRODUCING_MODES)
+        assert attempts > owes, "expected the attempt-set to strictly exceed the owing-set"
+        assert "auto" in attempts and "auto" not in owes
 
 
 # =========================================================================

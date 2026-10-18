@@ -180,6 +180,78 @@ feat(pool): add deduplication by MD5 checksum
 fix(gates): resolve V4 failure on missing brand asset
 ```
 
+### Choosing the type by release scope
+
+release-please decides whether to cut a public release from the commit **type
+alone** — the scope in parentheses plays no part. So `fix(ci):` is a `fix`, and
+it will force a public release even when the change is pure repo maintenance.
+That produces a version bump whose only observable difference is the version
+string, which is a release nobody asked for.
+
+**Rule: if the change touches no user-visible path, use a hidden type.**
+
+| Hidden (no release) | Visible (cuts a release) |
+|---------------------|-------------------------|
+| `chore:` `ci:` `test:` `refactor:` `style:` `build:` | `feat:` `fix:` `perf:` `docs:` `revert:` |
+
+Internal paths are `.github/`, `tests/`, `scripts/`, `docs/dev/`, the
+agent-client directories (`.claude/` `.codex/` `.opencode/` `.cursor/`
+`.trae/`), `AGENTS.md`, `CONTRIBUTING.md`, `Makefile`,
+`.pre-commit-config.yaml`, `.gitignore`, and source-generated artifacts such as
+`docs/doc-inventory.md`. Everything else — including `src/**` and hand-written
+docs under `docs/user/**` — is user-visible.
+
+```
+chore(ci): pin uv so the lock cannot drift        # internal  -> no release
+fix(ci): stop the publish workflow racing itself  # internal  -> WRONG, forces one
+```
+
+Note that `docs:` is a **visible** type. A change that only adds documents under
+`docs/dev/` is internal, so it wants `chore(docs):` or `refactor(docs):`, not
+`docs:`.
+
+The `release-scope` CI job enforces the visible-type half of this: an
+internal-only change typed as `feat`/`fix`/etc. fails and asks you to retype it.
+Two labels exist as explicit overrides — `release:user-visible` (internal paths,
+but genuinely user-facing) and `release:skip` (user-visible paths, but the
+release should be held). Reach for them rarely, and say why in the PR.
+
+A release-please proposal is exempt from this check: its type is bot-fixed and
+its diff spans a whole release interval, so the rule has nothing to judge. The
+exemption is identified by content — a `release-please--` head branch, a
+`chore(main): release ` title, and the release plumbing files in the diff — not
+by the author, so a human PR cannot claim it.
+
+A Dependabot pip PR is exempt too, and for the same reason: it is titled
+`chore(deps):`, it cannot retype itself, and its diff is the generated lockfile.
+The exemption requires **all four** conditions: the head branch must live in this
+repository (`head.repo.full_name` equals the base repo), the head branch must
+carry the `dependabot/` prefix (both `dependabot/uv/…` and `dependabot/pip/…` are
+in live use), *every* changed path must be `uv.lock`, and the title type must be
+hidden. So a fork PR named `dependabot/…`, a Dependabot PR that also touches
+`src/**`, and a lockfile-only PR retyped `fix(deps)` are all still judged
+normally.
+
+`pyproject.toml` is **not** exempt. It is the install contract and it ships in
+the sdist, so a manifest bump really is user-visible: it must be retyped with a
+visible type (e.g. `fix(deps):`) by a human. That is the difference between the
+lockfile and the manifest, and it is why only `uv.lock` is on the allowlist.
+
+### Signed-off-by and squash merges
+
+The `DCO` check requires a `Signed-off-by` trailer, and it runs on **PR commits**
+— that is where the signoff has to be, and where it is enforced.
+
+[ADR-005](docs/adr/ADR-005-issue-driven-commits.md) squash-merges to `main`, and
+GitHub's squash does not carry the trailer onto the resulting `main` commit. So a
+squash-merged commit on `main` normally has no `Signed-off-by`. **That is expected,
+not a defect.**
+
+Do not amend `main` to add it. On a release commit the tag has usually already
+been cut and published, and moving a published tag to change a commit message
+breaks release immutability for anyone who already installed from it. The tree
+and artifacts are unaffected by the message, so there is nothing to gain.
+
 ## Branch Naming
 
 Branches must follow a naming convention that mirrors commit types:

@@ -6,7 +6,8 @@ Layer priority (lowest → highest):
     3. User ``~/.automedia/`` directory
     4. ``~/.automedia/overrides/rules/*.yaml``
     5. ``~/.automedia/overrides/prompts/*.j2``
-    6. ``AUTOMEDIA_*`` environment variables, then *overrides* parameter
+    6. ``AUTOMEDIA_*`` environment variables (with the lazy ``.env`` overlay
+       beneath them), then *overrides* parameter
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from automedia.core.env_overlay import dotenv_overlay
 from automedia.exceptions import ConfigError
 
 _DEFAULTS_PATH = Path(__file__).resolve().parent.parent / "manifests" / "defaults.yaml"
@@ -126,6 +128,12 @@ def _env_to_config() -> dict[str, Any]:
 
     Generically-split keys (e.g. ``AUTOMEDIA_FOO_BAR=z`` → ``{"foo": {"bar": "z"}}``)
     remain the fallback.
+
+    The source mapping is ``{**dotenv_overlay(), **os.environ}``: keys present
+    in the real environment win over the ``.env`` overlay, per key.  That keeps
+    the documented priority ``environment variables > .env > file config >
+    built-in defaults`` for every ``AUTOMEDIA_*`` config key.  ``.env`` is read
+    lazily — importing this module never mutates ``os.environ``.
     """
     result: dict[str, Any] = {}
 
@@ -144,7 +152,7 @@ def _env_to_config() -> dict[str, Any]:
         "tavily_api_key": ["tavily", "api_key"],
     }
 
-    for key, value in os.environ.items():
+    for key, value in {**dotenv_overlay(), **os.environ}.items():
         if not key.startswith(_ENV_PREFIX):
             continue
         suffix = key[len(_ENV_PREFIX) :]
@@ -371,6 +379,10 @@ def load_config(
     # explicitly configured the new path.  Users should update their
     # project config (~/.automedia/ or .automedia/) to use the new keys.
     #
+    # ``defaults.yaml`` no longer ships a ``pipeline.image.comfyui`` block,
+    # so on a default install ``old_comfyui`` is None and this is a no-op.
+    # It fires only when a project/user config still sets the legacy path.
+    #
     # Deprecated since: engine-abstraction-layer (July 2026)
     # Removal target: engine-abstraction-layer+3 months
     # ------------------------------------------------------------------
@@ -386,7 +398,14 @@ def load_config(
                 DeprecationWarning,
                 stacklevel=2,
             )
-            config["engines"]["image"]["comfyui"] = dict(old_comfyui)
+            # Merge rather than replace: the legacy block carries only the keys
+            # that existed when the path was deprecated. Replacing wholesale
+            # would drop every key added to ``engines.image.comfyui`` since
+            # (e.g. base_size, upscale_model), leaving the engine to fall back
+            # to its in-code defaults instead of the declared ones.
+            config["engines"]["image"]["comfyui"] = deep_merge(
+                dict(default_comfyui or {}), dict(old_comfyui)
+            )
 
     validate_config(config)
     return config

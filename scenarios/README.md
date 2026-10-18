@@ -136,6 +136,7 @@ or value.
 |---|---|
 | `success` | The call envelope reports success; the call completed without a protocol-level error |
 | `data_has` | `output.data` is a dict containing every listed key |
+| `output_has` | The call's output dict carries every listed key |
 | `exit_code` | The CLI process exited with the given code |
 | `stdout_has` | CLI stdout contains every listed substring |
 | `stderr_has` | CLI stderr contains every listed substring |
@@ -143,6 +144,8 @@ or value.
 | `artifact_size_min` | That file is at least N bytes; applies to the path named in `artifact_exists` of the same block |
 | `artifact_nonempty` | The given path exists and is non-empty |
 | `gate_records_pass` | The artifact's JSON carries non-empty gate or pass records |
+| `min_score` | The output carries a numeric quality score at least this large |
+| `error_expected` | Opt in to a deliberately failing call: the error envelope (or non-zero exit) counts as a pass, not a failure |
 
 A step that deliberately exercises a failing call **must** declare
 `error_expected: true` in its `expect` block; otherwise the harness treats the
@@ -387,3 +390,25 @@ name, so a bug cannot be filed without committing to its lock. The
 discipline. The `standard:` keys every step cites are defined in
 `scenarios/STANDARDS.md`; `scenarios/regression/README.md` covers the
 regression-flywheel lifecycle for authors and reviewers.
+
+### Repo-infrastructure bugs are pinned by a gate, not a scenario
+
+`scenarios/` exercises the PRODUCT surface through CLI/MCP. A bug in the
+repo's own machinery — a CI workflow, a release gate, a pre-commit hook — is
+therefore **not** scenario material, and `check-workflow-semantics.py` records
+that as a pinned layering decision ("do NOT 'fix' by adding a scenario"): such
+an invariant belongs in a repo gate wired into pre-commit and CI, which is
+where it is enforced on every change.
+
+The bug template used to have no escape for this: its `regression-scenario`
+field was `required: true` unconditionally and accepted only a scenario name, so
+an infra bug was required by one rule to carry a validation scenario and
+forbidden by another from having one.
+
+The field is now `regression-lock` and asks a different question — **what locks
+this fix against regressing?** It still requires an answer, but accepts either
+kind of lock: a validation scenario for a product-surface bug, or the repo gate
+that enforces it for a repo-infrastructure bug (a CI workflow, a release gate, a
+pre-commit hook). That satisfies both rules without weakening either — the
+field still demands a lock, and the layering decision above is untouched. It is
+a reframing, not an escape hatch: there is no way to leave it blank.

@@ -31,10 +31,20 @@ class CheckResult(TypedDict):
     name: str
     passed: bool
     detail: str
+    # A sub-check may be deliberately not applicable (e.g. G3's brand_identity
+    # when the brand profile declares no identity).  Such a check reports
+    # ``status="skipped"`` with ``passed=True`` so it never fails the gate.
+    status: NotRequired[str]
     check_name: NotRequired[str]
     actual_value: NotRequired[str]
     threshold: NotRequired[str]
     suggestion: NotRequired[str]
+    # G0 additively attaches sentence-level failure detail where derivable
+    # (issue #219): which sentence / which number / whether the source
+    # citation is missing.  Purely additive — never replaces existing keys.
+    sentence: NotRequired[str]
+    number: NotRequired[str]
+    missing_citation: NotRequired[bool]
 
 
 class ExpectedVsActual(TypedDict):

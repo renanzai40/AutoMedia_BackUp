@@ -48,6 +48,8 @@ def _make_context(
     project_dir: str | None = None,
     config: dict[str, Any] | None = None,
     brand_profile: dict[str, Any] | None = None,
+    source_content: str | None = None,
+    source_material: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a minimal gate_context dict with sensible defaults."""
     ctx: dict[str, Any] = {
@@ -60,6 +62,10 @@ def _make_context(
         ctx["config"] = config
     if brand_profile is not None:
         ctx["brand_profile"] = brand_profile
+    if source_content is not None:
+        ctx["source_content"] = source_content
+    if source_material is not None:
+        ctx["source_material"] = source_material
     return ctx
 
 
@@ -217,7 +223,7 @@ class TestExecute:
 
         assert result["passed"] is True, f"Expected passed=True, got: {result}"
         user_msg = mock_llm.call_args_list[0][0][0]
-        assert "Brand voice: warm" in user_msg
+        assert "Brand tone/voice: warm" in user_msg
         assert "CTA principles" not in user_msg
 
     def test_cta_principles_tolerates_yaml_mapping_entries(self, tmp_path: Path) -> None:
@@ -397,3 +403,198 @@ class TestExecute:
         assert _call_system_prompt == custom_prompt, (
             f"Expected system_prompt={custom_prompt!r}, got {_call_system_prompt!r}"
         )
+
+
+# =========================================================================
+# Brand profile field injection (schema field names) — #149
+# =========================================================================
+
+_CTA_FORMS: tuple[str, ...] = (
+    "立即注册",
+    "立即体验",
+    "免费试用",
+    "免费领取",
+    "扫码…了解更多",
+    "点击…注册",
+    "联系我们",
+    "了解更多详情",
+    "sign up",
+    "learn more",
+    "get started",
+)
+
+
+class TestBrandProfileFieldInjection:
+    """CW must read brand fields by their schema names (#149).
+
+    中文说明：``brand_profile`` 到达门里时是 ``asdict(BrandProfile)``，键名等于
+    schema 字段名（``tone_guidelines`` / ``brand_identity``）。生成侧此前读的是
+    不存在的 ``voice``，导致语气指引静默失效、``brand_identity`` 从未注入。
+    """
+
+    def _build_user_message(self, tmp_path: Path, brand_profile: dict[str, Any]) -> str:
+        """Run CW with a mocked LLM and return the user message it was given."""
+        ctx = _make_context(
+            project_dir=str(tmp_path),
+            config=_minimal_config(),
+            brand_profile=brand_profile,
+        )
+        gate = ContentWriterGate()
+
+        with patch(
+            "automedia.gates.content_writer.llm_complete",
+            return_value=MOCK_ARTICLE,
+        ) as mock_llm:
+            result = gate.execute(ctx)
+
+        assert result["passed"] is True, f"Expected passed=True, got: {result}"
+        return str(mock_llm.call_args_list[0][0][0])
+
+    def test_schema_tone_and_identity_are_injected(self, tmp_path: Path) -> None:
+        """``tone_guidelines`` and ``brand_identity`` reach the writer prompt."""
+        user_msg = self._build_user_message(
+            tmp_path,
+            {
+                "brand_name": "TestBrand",
+                "tone_guidelines": "友好、口语化",
+                "brand_identity": "菲律宾外卖平台",
+            },
+        )
+
+        assert "友好、口语化" in user_msg
+        assert "菲律宾外卖平台" in user_msg
+        assert "Brand tone/voice: 友好、口语化" in user_msg
+        assert "菲律宾外卖平台" in user_msg.split("Brand identity", 1)[-1]
+
+    def test_identity_placement_rule_replaces_keyword_stuff_ban(self, tmp_path: Path) -> None:
+        """Prompt states the "first paragraph, once" rule and drops the old ban.
+
+        #202：旧表述 "do not keyword-stuff" 与 G3 判据（要求身份字面串出现）
+        互斥，是「恒拦」的根因之一。新表述必须给出可判定的位置与次数要求。
+        """
+        user_msg = self._build_user_message(
+            tmp_path,
+            {"brand_name": "TestBrand", "brand_identity": "菲律宾外卖平台"},
+        )
+
+        assert "first paragraph" in user_msg
+        assert "must not be repeated" in user_msg
+        assert "do not keyword-stuff" not in user_msg
+
+    def test_legacy_voice_key_is_still_honoured(self, tmp_path: Path) -> None:
+        """A profile without ``tone_guidelines`` falls back to legacy ``voice``."""
+        user_msg = self._build_user_message(
+            tmp_path,
+            {"brand_name": "TestBrand", "voice": "老风格"},
+        )
+
+        assert "老风格" in user_msg
+        assert "Brand tone/voice: 老风格" in user_msg
+
+    def test_empty_fields_produce_no_empty_injection(self, tmp_path: Path) -> None:
+        """Empty ``tone_guidelines`` / ``brand_identity`` inject nothing, no crash."""
+        user_msg = self._build_user_message(
+            tmp_path,
+            {
+                "brand_name": "TestBrand",
+                "tone_guidelines": "",
+                "brand_identity": "",
+                "voice": "",
+            },
+        )
+
+        assert "Brand tone" not in user_msg
+        assert "Brand identity" not in user_msg
+        for line in user_msg.splitlines():
+            if line.startswith(("Brand tone", "Brand identity")):
+                value = line.split(": ", 1)[-1] if ": " in line else ""
+                assert value.strip(), f"empty brand field injected: {line!r}"
+
+    def test_cta_forms_are_listed_verbatim(self, tmp_path: Path) -> None:
+        """The accepted CTA forms are spelled out as literal prompt examples."""
+        user_msg = self._build_user_message(tmp_path, {"brand_name": "TestBrand"})
+
+        for form in _CTA_FORMS:
+            assert form in user_msg, f"CTA form {form!r} missing from writer prompt"
+
+
+# =========================================================================
+# Generation-side sourced-numbers constraint — #219
+# =========================================================================
+
+_SOURCED_NUMBERS_MARKER = "SOURCED NUMBERS ONLY"
+_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "src" / "automedia" / "prompts"
+
+
+class TestSourceMaterialInjection:
+    """CW injects ``gate_context["source_content"]`` and constrains numbers to it (#219).
+
+    中文说明：G0 数字校验的下游约束必须在生成侧成立 —— 写手只能用来源材料中
+    真实出现的数字，否则改用定性表达；没有来源时不得凭空生成任何数字。
+    """
+
+    def _writer_user_message(self, ctx: dict[str, Any]) -> str:
+        gate = ContentWriterGate()
+        with patch(
+            "automedia.gates.content_writer.llm_complete",
+            return_value=MOCK_ARTICLE,
+        ) as mock_llm:
+            result = gate.execute(ctx)
+        assert result["passed"] is True, f"Expected passed=True, got: {result}"
+        return str(mock_llm.call_args_list[0][0][0])
+
+    def test_source_block_injected_when_present(self, tmp_path: Path) -> None:
+        ctx = _make_context(
+            project_dir=str(tmp_path),
+            config=_minimal_config(),
+            source_content="2025年市场规模达到 123.4 亿元，同比增长 8.7%。",
+            source_material={"path": "https://example.com/report"},
+        )
+
+        user_msg = self._writer_user_message(ctx)
+
+        assert "=== SOURCE MATERIAL" in user_msg
+        assert "=== END SOURCE MATERIAL ===" in user_msg
+        assert "123.4 亿元" in user_msg
+        assert "https://example.com/report" in user_msg
+        assert _SOURCED_NUMBERS_MARKER in user_msg
+        assert "qualitative" in user_msg
+
+    def test_source_block_absent_when_not_provided(self, tmp_path: Path) -> None:
+        ctx = _make_context(project_dir=str(tmp_path), config=_minimal_config())
+
+        user_msg = self._writer_user_message(ctx)
+
+        assert "SOURCE MATERIAL" not in user_msg
+        assert _SOURCED_NUMBERS_MARKER not in user_msg
+
+    def test_source_content_truncated_at_cap(self, tmp_path: Path) -> None:
+        from automedia.gates.content_writer import _SOURCE_CONTENT_MAX_CHARS
+
+        tail_marker = "TAIL-UNIQUE-STRING"
+        ctx = _make_context(
+            project_dir=str(tmp_path),
+            config=_minimal_config(),
+            source_content=("A" * _SOURCE_CONTENT_MAX_CHARS) + tail_marker,
+        )
+
+        user_msg = self._writer_user_message(ctx)
+
+        assert "SOURCE MATERIAL TRUNCATED" in user_msg
+        assert tail_marker not in user_msg
+
+    def test_generic_template_carries_hard_constraint(self) -> None:
+        from automedia.prompts import load_prompt
+
+        prompt = load_prompt("content_writer", platform="")
+
+        assert _SOURCED_NUMBERS_MARKER in prompt
+        assert "qualitative" in prompt
+
+    def test_platform_variants_carry_hard_constraint(self) -> None:
+        variants = sorted((_PROMPTS_DIR / "platforms").glob("*/content_writer.j2"))
+        assert len(variants) == 10, f"expected 10 platform variants, found {len(variants)}"
+
+        for path in variants:
+            text = path.read_text(encoding="utf-8")
+            assert _SOURCED_NUMBERS_MARKER in text, f"missing constraint in {path}"

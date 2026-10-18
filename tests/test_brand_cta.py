@@ -9,6 +9,7 @@ from automedia.gates.base import BaseGate, _registry
 from automedia.gates.brand_cta import (
     _CHECK_NAMES,
     G3BrandCTA,
+    _check_brand_identity,
     _check_brand_name_present,
 )
 
@@ -249,14 +250,21 @@ class TestG3RealBrandIdentity:
     """Real brand identity check without mocks."""
 
     def test_identity_ai_content_production(self) -> None:
-        """Content contains 'AI内容生产' → pass."""
-        ctx = _make_context(content="壹目贯维是AI内容生产领域的先行者。立即咨询。")
+        """Content contains the declared identity 'AI内容生产公司' → pass."""
+        ctx = _make_context(content="壹目贯维是AI内容生产公司，深耕AI内容生产领域。立即咨询。")
         result = G3BrandCTA().execute(ctx)
         bi = next(c for c in result["checks"] if c["name"] == "brand_identity")
         assert bi["passed"] is True
 
-    def test_identity_wrong_in_profile_fails(self) -> None:
-        """brand_profile declares wrong identity → fail."""
+    def test_identity_industry_wordlist_does_not_gate(self) -> None:
+        """A brand declaring an investment identity passes on consistency (#157).
+
+        中文说明：正文体现了档案声明的身份就该 pass。此��把投资/金融词当「恒错
+        身份」写死在gate 里，使正当投资品牌即使档案与正文完全一致也被判失败，
+        且失败信息建议它改成「AI内容生产」——对这类账号是错误引导。禁止词由
+        per-brand 的 ``blocked_words`` 负责（见 ``blocked_words_absent``），
+        身份检查只管一致性。
+        """
         profile = {**_DEFAULT_BRAND_PROFILE, "brand_identity": "投资情报分析"}
         ctx = _make_context(
             content="壹目贯维提供投资情报分析服务。立即咨询。",
@@ -264,7 +272,38 @@ class TestG3RealBrandIdentity:
         )
         result = G3BrandCTA().execute(ctx)
         bi = next(c for c in result["checks"] if c["name"] == "brand_identity")
+        assert bi["passed"] is True
+
+    def test_identity_inconsistent_with_profile_still_fails(self) -> None:
+        """Consistency is still enforced — the other direction (#157).
+
+        中文说明：删掉行业词表不等于把门放松。档案声明身份但正文体现的是另一
+        个身份时，仍必须 fail——这才是本检查该守的不变量。
+        """
+        profile = {**_DEFAULT_BRAND_PROFILE, "brand_identity": "菲律宾外卖平台"}
+        ctx = _make_context(
+            content="壹目贯维是AI内容生产公司，深耕AI内容生产领域。立即咨询。",
+            brand_profile=profile,
+        )
+        result = G3BrandCTA().execute(ctx)
+        bi = next(c for c in result["checks"] if c["name"] == "brand_identity")
         assert bi["passed"] is False
+
+    def test_blocked_words_still_block_the_brand_that_declares_them(self) -> None:
+        """The industry concern survives where it belongs: per-brand (#157).
+
+        中文说明：默认档案的 ``blocked_words`` 已经含「投资情报」等词，所以
+        真正想拦投资话术的品牌仍有机制可用——只是由用户自己的档案声明，
+        而不是所有品牌共享一份硬编码。
+        """
+        assert "投资情报" in _DEFAULT_BRAND_PROFILE["blocked_words"]
+        ctx = _make_context(
+            content="我们提供投资情报分析服务。立即咨询。",
+            brand_profile=_DEFAULT_BRAND_PROFILE,
+        )
+        result = G3BrandCTA().execute(ctx)
+        bw = next(c for c in result["checks"] if c["name"] == "blocked_words_absent")
+        assert bw["passed"] is False
 
     def test_identity_missing_in_content_fails(self) -> None:
         """Content has no identity phrase → fail."""
@@ -272,6 +311,98 @@ class TestG3RealBrandIdentity:
         result = G3BrandCTA().execute(ctx)
         bi = next(c for c in result["checks"] if c["name"] == "brand_identity")
         assert bi["passed"] is False
+
+
+class TestG3DeclaredBrandIdentity:
+    """brand_identity 判定以档案声明值为准（#146 契约）。"""
+
+    def test_declared_identity_in_content_passes(self) -> None:
+        """档案声明「菲律宾外卖平台」且正文如实包含 → pass."""
+        profile = {**_DEFAULT_BRAND_PROFILE, "brand_identity": "菲律宾外卖平台"}
+        result = _check_brand_identity(
+            "本平台是菲律宾外卖平台，覆盖全境即时配送。立即咨询。",
+            profile,
+        )
+        assert result["passed"] is True
+        assert "菲律宾外卖平台" in result["detail"]
+
+    def test_declared_identity_absent_from_content_fails(self) -> None:
+        """同一档案但正文写的是别的身份（含默认短语）→ fail."""
+        profile = {**_DEFAULT_BRAND_PROFILE, "brand_identity": "菲律宾外卖平台"}
+        result = _check_brand_identity(
+            "这是一家专注AI内容创作的公司。立即咨询。",
+            profile,
+        )
+        assert result["passed"] is False
+        assert "菲律宾外卖平台" in result["detail"]
+
+    def test_undeclared_identity_is_skipped(self) -> None:
+        """档案没有 brand_identity 字段 → 该子检查 skip，不判失败（#202）.
+
+        未声明身份时不再回退到凭空默认短语；skip 也不代表 pass 之外的意义——
+        它必须带 ``status="skipped"`` 供 gate-report 记账。
+        """
+        profile = {"brand_name": "壹目贯维", "aliases": ["1StepMore"]}
+        result = _check_brand_identity("我们专注AI内容创作。立即咨询。", profile)
+        assert result["passed"] is True
+        assert result.get("status") == "skipped"
+        assert "no declared identity" in result["detail"]
+
+
+class TestG3BrandIdentityFirstParagraph:
+    """品牌身份判据 = 出现在正文首段，出现次数 ≥1（#202 方案 ②）。"""
+
+    def test_declared_identity_in_first_paragraph_passes(self) -> None:
+        """身份出现在正文首段 → pass."""
+        profile = {**_DEFAULT_BRAND_PROFILE, "brand_identity": "菲律宾外卖平台"}
+        result = _check_brand_identity(
+            "本平台是菲律宾外卖平台，覆盖全境即时配送。\n\n后续段落介绍配送网络。",
+            profile,
+        )
+        assert result["passed"] is True
+        assert "菲律宾外卖平台" in result["detail"]
+
+    def test_declared_identity_only_in_later_paragraph_fails(self) -> None:
+        """身份只在正文中后段出现 → fail，信息写明窗口与实际段号."""
+        profile = {**_DEFAULT_BRAND_PROFILE, "brand_identity": "菲律宾外卖平台"}
+        result = _check_brand_identity(
+            "我们提供极速配送服务，覆盖全境。\n\n本平台是菲律宾外卖平台，专注即时零售。",
+            profile,
+        )
+        assert result["passed"] is False
+        assert "菲律宾外卖平台" in result["detail"]
+        assert "first body paragraph" in result["detail"]
+        assert "paragraph 2" in result["detail"]
+
+    def test_identity_beyond_window_without_paragraph_break_fails(self) -> None:
+        """无段落切分时用前 200 字符窗口；越过窗口的身份判 fail 并写明位置."""
+        profile = {**_DEFAULT_BRAND_PROFILE, "brand_identity": "菲律宾外卖平台"}
+        filler = "这是一段很长的开场白。" * 40  # 400 chars, no blank-line break
+        result = _check_brand_identity(filler + "本平台是菲律宾外卖平台。", profile)
+        assert result["passed"] is False
+        assert "first 200 characters" in result["detail"]
+        assert "character" in result["detail"]
+
+
+class TestG3BrandIdentitySkipAggregation:
+    """未声明身份 ⇒ brand_identity skip，G3 不因此失败，下游可达（#202）。"""
+
+    def test_undeclared_identity_check_is_skip(self) -> None:
+        profile = {"brand_name": "壹目贯维", "aliases": ["1StepMore"], "blocked_words": []}
+        result = _check_brand_identity("我们专注优质内容服务。立即咨询。", profile)
+        assert result["passed"] is True
+        assert result.get("status") == "skipped"
+
+    def test_g3_passes_with_five_checks_plus_identity_skip(self) -> None:
+        """5 项通过 + 1 项 skip ⇒ G3 通过."""
+        profile = {"brand_name": "壹目贯维", "aliases": ["1StepMore"], "blocked_words": []}
+        content = "壹目贯维专注优质内容服务。\n\n如果你感兴趣，立即咨询获取更多详情。"
+        result = G3BrandCTA().execute({"content": content, "brand_profile": profile})
+
+        bi = next(c for c in result["checks"] if c["name"] == "brand_identity")
+        assert bi["status"] == "skipped"
+        assert bi["passed"] is True
+        assert result["passed"] is True, f"G3 should pass on 5 pass + 1 skip: {result}"
 
 
 class TestG3RealBlockedWords:

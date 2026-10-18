@@ -4,8 +4,8 @@
 
 | Path | Size (bytes) | Type |
 |------|-------------:|------|
-| AGENTS.md | 14292 | file |
-| README.md | 30930 | file |
+| AGENTS.md | 14734 | file |
+| README.md | 31840 | file |
 | docs/adr | — | dir |
 | docs/adr/ADR-001-singleton-registry-unification.md | 4740 | file |
 | docs/adr/ADR-002-hitl-decision-layer-decoupling.md | 4999 | file |
@@ -20,20 +20,22 @@
 | docs/dev/2026-08-30-graph-engineering-调研与三项目落地-修正版.md | 15409 | file |
 | docs/dev/AutoMedia开发简报.md | 4640 | file |
 | docs/dev/agent-reference.md | 12520 | file |
-| docs/dev/agent-troubleshooting.md | 27046 | file |
-| docs/dev/api-gotchas.md | 9365 | file |
+| docs/dev/agent-troubleshooting.md | 27259 | file |
+| docs/dev/api-gotchas.md | 10310 | file |
 | docs/dev/automedia-business-validation-20260902.md | 19417 | file |
 | docs/dev/automedia-dev-roadmap-20260902.md | 8495 | file |
 | docs/dev/capability-gap-assessment-20260915.md | 13124 | file |
 | docs/dev/competitive-landscape-20260915.md | 16144 | file |
 | docs/dev/cron-troubleshooting.md | 5174 | file |
 | docs/dev/deep-module-rfc-001.md | 12981 | file |
-| docs/dev/developer-guide.md | 25319 | file |
+| docs/dev/developer-guide.md | 25320 | file |
 | docs/dev/evaluation-matrix-principles.md | 39285 | file |
 | docs/dev/forward-compat.md | 12884 | file |
-| docs/dev/founder-expectations.md | 112193 | file |
-| docs/dev/gate-failure-modes.md | 21860 | file |
-| docs/dev/override-reference.md | 9343 | file |
+| docs/dev/founder-expectations.md | 112497 | file |
+| docs/dev/gate-failure-modes.md | 23011 | file |
+| docs/dev/override-reference.md | 9341 | file |
+| docs/dev/plans | — | dir |
+| docs/dev/plans/NIGHTLY.md | 17492 | file |
 | docs/dev/project-evaluation-2026-09-06.md | 3219 | file |
 | docs/dev/project-health-assessment-20260917.md | 17689 | file |
 | docs/dev/project-validation-framework.md | 12572 | file |
@@ -51,9 +53,9 @@
 | docs/user/api-reference.md | 14159 | file |
 | docs/user/asset-library.md | 11894 | file |
 | docs/user/cli-reference.md | 28007 | file |
-| docs/user/deployment.md | 8345 | file |
+| docs/user/deployment.md | 8829 | file |
 | docs/user/hitl-framework.md | 9314 | file |
-| docs/user/mcp-setup.md | 26854 | file |
+| docs/user/mcp-setup.md | 26970 | file |
 | docs/user/omni-integration.md | 13082 | file |
 | docs/user/production-workflow.md | 10716 | file |
 | docs/user/user-introduction.md | 8446 | file |

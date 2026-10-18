@@ -46,25 +46,105 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Trusted `main` only -- never the PR head: a PR must not supply the script
+      # that judges it, and a branch that never pushes again (release-please holds
+      # its proposal branch frozen for the life of the release) would otherwise be
+      # judged forever by the gate as it stood when the PR was opened (#137).
       - uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      # No `--depth=1` fetch here: checkout already provides origin/<base> with
-      # full history, and a shallow ref can break the merge-base computation the
-      # three-dot diff below needs (fatal: no merge base, or a wrong range).
       - name: Check changed paths against the PR's release scope
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # A release-please proposal's type is bot-fixed and its diff spans the
+          # whole release interval, so the type-vs-scope table cannot judge it
+          # (issue #134). Author + head ref are what identify one; the script
+          # requires all three signals, so a human PR cannot claim the exemption.
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # A Dependabot pip PR is typed chore(deps) and touches only the generated
+          # lockfile, so it needs the lockfile exemption (issues #167-#170). The script
+          # admits it only when the head branch lives in the BASE repo, which a fork PR
+          # named dependabot/... cannot fake; an omitted (empty) value denies it.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          BASE_REF="${{ github.base_ref }}"
-          if ! git rev-parse --verify --quiet "origin/$BASE_REF" >/dev/null; then
-            git fetch origin "$BASE_REF"
-          fi
+          # fetch-depth:0 above yields full main history, so the three-dot diff still
+          # finds a merge base even though the head branch forked before the latest
+          # main. Do NOT narrow this to a shallow fetch: a truncated main breaks the
+          # merge-base computation (fatal: no merge base, or a wrong range).
           git rev-parse --verify "origin/$BASE_REF^{commit}"
-          git diff --name-only "origin/$BASE_REF...HEAD" \
-            | python3 scripts/check_release_scope.py --files - --title "$PR_TITLE" --labels "$LABELS"
+          # refs/pull/N/head exists for same-repo and fork PRs alike, and unlike the
+          # synthetic refs/pull/N/merge it is not a cached snapshot of a past base.
+          git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/remotes/pr/$PR_NUMBER"
+          # An empty diff must FAIL. check_release_scope.py treats "no files" as
+          # nothing to judge and exits 0, so without this guard a bad ref or a
+          # truncated fetch would silently pass every PR instead of judging nothing.
+          FILES="$(git diff --name-only "origin/$BASE_REF...refs/remotes/pr/$PR_NUMBER")"
+          if [ -z "$FILES" ]; then
+            echo "::error::empty diff for origin/$BASE_REF...refs/pull/$PR_NUMBER/head; refusing to report a scope check that judged no files"
+            exit 1
+          fi
+          printf '%s\n' "$FILES" \
+            | python3 scripts/check_release_scope.py --files - --title "$PR_TITLE" \
+                --labels "$LABELS" --pr-author "$PR_AUTHOR" --head-ref "$HEAD_REF" \
+                --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO"
+      # release-please decides whether to cut a release from the commit message that
+      # lands on `main` -- and a squash merge lands the HEAD COMMIT's subject there,
+      # not the PR title. A title that disagrees with the head commit is therefore a
+      # gate that judged one string while the release reads another: that is how
+      # #172 shipped a user-visible manifest change under a hidden type with no
+      # changelog entry, even though `release-scope` was green. Catch it before the
+      # merge instead of after the release.
+      - name: PR title type agrees with the squashed commit subject type
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          # Mirrors check_release_scope.parse_title_type: the text before the first
+          # "(", then before the first ":", with "!" stripped, trimmed, lowercased.
+          # Both sides go through the identical function so only a real divergence is
+          # reported, never a formatting difference.
+          conventional_type() {
+            local text="$1" head
+            head="${text%%:*}"
+            head="${head%%(*}"
+            head="${head%!}"
+            printf '%s' "$head" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+              | tr '[:upper:]' '[:lower:]'
+          }
+          # The ref fetched by the previous step persists in this job's workspace.
+          # --no-merges, bounded by the merge base, skips GitHub's synthetic
+          # "Merge branch 'main' into ..." commits -- the update-branch API adds one,
+          # and `git log -1` would otherwise read that instead of the author's work.
+          # Do NOT pipe this through `head -1`: under `set -o pipefail`, git gets
+          # SIGPIPE when head closes early and the whole pipeline exits 141, a false
+          # red (#212). Use git's own -1 limit instead, which needs no pipe.
+          SUBJECT="$(git log --no-merges -1 --format=%s \
+            "origin/$BASE_REF...refs/remotes/pr/$PR_NUMBER")"
+          TITLE_TYPE="$(conventional_type "$PR_TITLE")"
+          SUBJECT_TYPE="$(conventional_type "$SUBJECT")"
+          echo "PR title:         $PR_TITLE"
+          echo "head commit:      $SUBJECT"
+          # A conventional-commit type is what release-please can act on, so an empty
+          # reading on either side leaves nothing to compare. check-pr-title owns PR
+          # title format separately.
+          if [ -z "$TITLE_TYPE" ] || [ -z "$SUBJECT_TYPE" ]; then
+            echo "::notice::could not read a conventional type from both sides; skipping the comparison"
+            exit 0
+          fi
+          if [ "$TITLE_TYPE" != "$SUBJECT_TYPE" ]; then
+            echo "::error::PR title type '$TITLE_TYPE' differs from head commit subject type '$SUBJECT_TYPE'. A squash merge lands the head commit's subject on main, and release-please reads THAT to decide whether to cut a release and what the changelog says -- so this PR was judged as '$TITLE_TYPE' but would be released as '$SUBJECT_TYPE'. Make them agree: retitle the PR to match the head commit, or amend the head commit to match the PR."
+            exit 1
+          fi
+          echo "both sides read '$TITLE_TYPE'"

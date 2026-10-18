@@ -1,5 +1,153 @@
 # Changelog
 
+## [1.8.14](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.13...automedia-v1.8.14) (2026-10-18)
+
+
+### Bug Fixes
+
+* 中文 topic 生成 slug 不再硬失败 ([#228](https://github.com/1StepMore/AutoMedia/issues/228)) + doctor 的 chrome 检查与真实渲染路径同源 ([#227](https://github.com/1StepMore/AutoMedia/issues/227)) ([#229](https://github.com/1StepMore/AutoMedia/issues/229)) ([2649484](https://github.com/1StepMore/AutoMedia/commit/2649484fd4c64cf1df6c9821cb53eaaed015686f))
+
+
+### Documentation
+
+* 对齐漂移计数与门描述（2026-10-18 漂移审计） ([#231](https://github.com/1StepMore/AutoMedia/issues/231)) ([2cfd451](https://github.com/1StepMore/AutoMedia/commit/2cfd4517e1711ba156f3dbd649c469b1a24c5b93))
+
+## [1.8.13](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.12...automedia-v1.8.13) (2026-10-17)
+
+
+### Bug Fixes
+
+* **llm:** 结构化输出加字段级容错 + 一次二次修复 ([#221](https://github.com/1StepMore/AutoMedia/issues/221)) ([#222](https://github.com/1StepMore/AutoMedia/issues/222)) ([c256aed](https://github.com/1StepMore/AutoMedia/commit/c256aed5607aaac44d5569faf8624b33af64b93a))
+
+## [1.8.12](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.11...automedia-v1.8.12) (2026-10-17)
+
+
+### Bug Fixes
+
+* **gates:** G0 无出处数字先重写一次，仍失败才拦停 + 生成侧限制仅用来源数字（[#219](https://github.com/1StepMore/AutoMedia/issues/219)） ([#224](https://github.com/1StepMore/AutoMedia/issues/224)) ([d4c2a99](https://github.com/1StepMore/AutoMedia/commit/d4c2a9913f6016a4bd3b57aca80385c6d6de9919))
+
+## [1.8.11](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.10...automedia-v1.8.11) (2026-10-17)
+
+
+### Bug Fixes
+
+* **core:** .env 惰性加载，import 期不再污染 os.environ（[#207](https://github.com/1StepMore/AutoMedia/issues/207)） ([#218](https://github.com/1StepMore/AutoMedia/issues/218)) ([19dd582](https://github.com/1StepMore/AutoMedia/commit/19dd5824a5f30a2a16bebdb24a272e2d60037c57))
+* **manifests:** 模型配置写入安全：空值拒写、时间戳备份、真实用户目录守卫（[#208](https://github.com/1StepMore/AutoMedia/issues/208)） ([#215](https://github.com/1StepMore/AutoMedia/issues/215)) ([55751e0](https://github.com/1StepMore/AutoMedia/commit/55751e08fee4cf43fa3ea339014c34357b8ca0c9))
+
+
+### Dependencies
+
+* **deps:** bump mcp from 1.28.1 to 1.30.0 ([#217](https://github.com/1StepMore/AutoMedia/issues/217)) ([22648ea](https://github.com/1StepMore/AutoMedia/commit/22648ea6e5d543cb22f906bfefa478062f34caae))
+
+## [1.8.10](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.9...automedia-v1.8.10) (2026-10-15)
+
+
+### Bug Fixes
+
+* **gates:** G3 品牌身份改为「首段出现一次」判据 + 未声明时 skip（[#202](https://github.com/1StepMore/AutoMedia/issues/202)） ([#211](https://github.com/1StepMore/AutoMedia/issues/211)) ([22957ae](https://github.com/1StepMore/AutoMedia/commit/22957ae6a1555043fced68dddc35c72f356969a7))
+
+## [1.8.9](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.8...automedia-v1.8.9) (2026-10-15)
+
+
+### Bug Fixes
+
+* **llm:** 兜底档空值不再覆盖主配置，并让 doctor 逐档试构造（[#206](https://github.com/1StepMore/AutoMedia/issues/206)） ([#209](https://github.com/1StepMore/AutoMedia/issues/209)) ([158a8c0](https://github.com/1StepMore/AutoMedia/commit/158a8c0a3db7362fa735f5611e56585dbc86d525))
+
+
+### Dependencies
+
+* **deps:** bump bridgecrewio/checkov-action ([#201](https://github.com/1StepMore/AutoMedia/issues/201)) ([f845e5f](https://github.com/1StepMore/AutoMedia/commit/f845e5f7db9f272d4d28ce64f08a9b5393886d2d))
+
+
+### Documentation
+
+* **nightly:** 收敛为单一权威文档，删除 docs/NIGHTLY.md 镜像（[#199](https://github.com/1StepMore/AutoMedia/issues/199)） ([#210](https://github.com/1StepMore/AutoMedia/issues/210)) ([969940f](https://github.com/1StepMore/AutoMedia/commit/969940fe74e9910a18919fcb0f1a5983fefd570d))
+* 入库 docs/NIGHTLY.md（不眠计划冻结区镜像）+ 忽略渲染副本 ([#203](https://github.com/1StepMore/AutoMedia/issues/203)) ([d179702](https://github.com/1StepMore/AutoMedia/commit/d179702ebc0fdfa4827c750650854cbbd0f1e006))
+
+## [1.8.8](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.7...automedia-v1.8.8) (2026-10-06)
+
+
+### Dependencies
+
+* **deps:** bump multidict from 6.7.1 to 6.9.1 ([#189](https://github.com/1StepMore/AutoMedia/issues/189)) ([fc62f89](https://github.com/1StepMore/AutoMedia/commit/fc62f89d07fc885a6eed31287a93c5f95b66726d))
+
+## [1.8.7](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.6...automedia-v1.8.7) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** correct the openai extra bound rationale in pyproject.toml ([#177](https://github.com/1StepMore/AutoMedia/issues/177)) ([fe56e70](https://github.com/1StepMore/AutoMedia/commit/fe56e706cc1801169d20ca9143eccbda76d78c6f))
+
+## [1.8.6](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.5...automedia-v1.8.6) (2026-10-05)
+
+
+### Dependencies
+
+* **deps:** bump soupsieve from 2.8.4 to 2.9 ([#176](https://github.com/1StepMore/AutoMedia/issues/176)) ([42b24ff](https://github.com/1StepMore/AutoMedia/commit/42b24ffcac2f715b1596e464e25b19935a4b1a8d))
+
+## [1.8.5](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.4...automedia-v1.8.5) (2026-10-05)
+
+
+### Bug Fixes
+
+* **config:** stop the stale pipeline.image.comfyui block masking engines ([#164](https://github.com/1StepMore/AutoMedia/issues/164)) ([#165](https://github.com/1StepMore/AutoMedia/issues/165)) ([2ba0254](https://github.com/1StepMore/AutoMedia/commit/2ba02549e2bfa038bb09c10a122e035cc43bb709))
+* **mcp:** make the os.replace retry deadline-bounded, not a fixed attempt count ([#179](https://github.com/1StepMore/AutoMedia/issues/179)) ([acabf86](https://github.com/1StepMore/AutoMedia/commit/acabf862a2b4a4f701b2be269e0f3e5a0abbdb3b))
+* **mcp:** stop losing active_pipelines entries to a writer race ([#173](https://github.com/1StepMore/AutoMedia/issues/173)) ([6c48355](https://github.com/1StepMore/AutoMedia/commit/6c483555e965f76878203467c10394bd4dc544d4))
+
+
+### Dependencies
+
+* **deps:** bump bridgecrewio/checkov-action ([#171](https://github.com/1StepMore/AutoMedia/issues/171)) ([3539112](https://github.com/1StepMore/AutoMedia/commit/353911263a92226f8e72326edaca12f6ccd4b5cc))
+* **deps:** bump litellm from 1.91.1 to 1.91.5 ([#170](https://github.com/1StepMore/AutoMedia/issues/170)) ([0f0057d](https://github.com/1StepMore/AutoMedia/commit/0f0057d9b2b973065ae0fb745fefa53ffb1b3f46))
+* **deps:** bump pyjwt from 2.13.0 to 2.15.0 ([#167](https://github.com/1StepMore/AutoMedia/issues/167)) ([b906dea](https://github.com/1StepMore/AutoMedia/commit/b906dea934388f4fca37c0f962e4e11a8222f1eb))
+* **deps:** bump urllib3 from 2.7.0 to 2.8.0 ([#169](https://github.com/1StepMore/AutoMedia/issues/169)) ([18d17e6](https://github.com/1StepMore/AutoMedia/commit/18d17e698411f43039276b2f1fc4815d743a8992))
+* **deps:** bump virtualenv from 21.6.0 to 21.7.13 ([#168](https://github.com/1StepMore/AutoMedia/issues/168)) ([81d119d](https://github.com/1StepMore/AutoMedia/commit/81d119d7eef54e5b0b872d0ce96a590b18fe5d23))
+
+## [1.8.4](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.3...automedia-v1.8.4) (2026-10-04)
+
+
+### Bug Fixes
+
+* **engines:** comfyui 出图改走原生分辨率 + ESRGAN 放大（修图文轨崩坏与超时） ([#161](https://github.com/1StepMore/AutoMedia/issues/161)) ([dcc145a](https://github.com/1StepMore/AutoMedia/commit/dcc145abf823b744a32b9cb0a225558b60c5eef6))
+* **engines:** hyperframes 引擎按真实 CLI 接口调用（位置参数 + cli_path/npx 解析） ([#162](https://github.com/1StepMore/AutoMedia/issues/162)) ([#163](https://github.com/1StepMore/AutoMedia/issues/163)) ([8c433ad](https://github.com/1StepMore/AutoMedia/commit/8c433ad0b53e41a042025a59d301aa0cdfb2e163))
+* **g3:** drop the industry wordlist that gated brand identity ([5e82e59](https://github.com/1StepMore/AutoMedia/commit/5e82e5942963d1a307d14d61c289b70b527929f2))
+
+## [1.8.3](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.2...automedia-v1.8.3) (2026-10-02)
+
+
+### Bug Fixes
+
+* **cw:** 品牌语气/身份注入改用 schema 字段名 + CTA 口径对齐 ([#149](https://github.com/1StepMore/AutoMedia/issues/149)) ([a0cbd15](https://github.com/1StepMore/AutoMedia/commit/a0cbd1565f2a8c2bbb69dff313c893a73d5c93c4))
+* **g3:** 品牌身份判定改用档案声明值，未声明时回退默认短语 ([#146](https://github.com/1StepMore/AutoMedia/issues/146)) ([8caae26](https://github.com/1StepMore/AutoMedia/commit/8caae26545f7aa593f3800dae53ccfd15f65a5d3))
+* **pipeline:** downgrade an auto run that owes a video but produced none ([e536ffa](https://github.com/1StepMore/AutoMedia/commit/e536ffa98341eac0fb4a513237884fd0bcf70fd6))
+
+
+### Documentation
+
+* **issues:** let the bug template name any lock, not only a scenario ([952dc54](https://github.com/1StepMore/AutoMedia/commit/952dc54de69002d8c1a58a0e2edbbfdabc264082))
+
+## [1.8.2](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.1...automedia-v1.8.2) (2026-10-01)
+
+
+### Documentation
+
+* **scenarios:** record the repo-infra exemption from the regression flywheel ([9050510](https://github.com/1StepMore/AutoMedia/commit/905051098d9ada1c98161543067945646f6f8e00))
+
+## [1.8.1](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.0...automedia-v1.8.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **ci:** stop the publish workflow racing itself on every release ([#114](https://github.com/1StepMore/AutoMedia/issues/114)) ([b04f58f](https://github.com/1StepMore/AutoMedia/commit/b04f58f0be430d0d6f559ca039ea6711fd06bb3a))
+* **release:** parse changelog-sections as the array release-please requires ([#118](https://github.com/1StepMore/AutoMedia/issues/118)) ([28b6f1e](https://github.com/1StepMore/AutoMedia/commit/28b6f1e0c0e04f426449b4031399f81e0310367e)), closes [#117](https://github.com/1StepMore/AutoMedia/issues/117)
+* **release:** stop internal-only commits forcing public PyPI releases ([#116](https://github.com/1StepMore/AutoMedia/issues/116)) ([2d0d5f4](https://github.com/1StepMore/AutoMedia/commit/2d0d5f4890dbf86a14a87c0d29ea85ea97e34456))
+
+
+### Documentation
+
+* **skills:** document the maintainer-only skill exception ([#128](https://github.com/1StepMore/AutoMedia/issues/128)) ([64b66f7](https://github.com/1StepMore/AutoMedia/commit/64b66f7f7fb8cafa1c5591902f53c1a7ffae6b3f))
+* **skills:** keep local-only maintainer skills out of the repo ([#127](https://github.com/1StepMore/AutoMedia/issues/127)) ([f03802b](https://github.com/1StepMore/AutoMedia/commit/f03802b5036ef4282279b18056165e7ae8d3fd25))
+
 ## [1.8.0](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.7.1...automedia-v1.8.0) (2026-09-28)
 
 

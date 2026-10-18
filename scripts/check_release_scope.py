@@ -12,6 +12,75 @@ genuine exception.
 
 The decision logic lives in the pure :func:`assess_release_scope`, which the
 unit tests call directly; :func:`main` is a thin, stdlib-only CLI wrapper.
+
+RELEASE-PROPOSAL EXEMPTION (issue #134)
+---------------------------------------
+A release-please proposal is exempt from the type-vs-scope table, because that
+table's premise does not hold for it: the bot fixes the title type at
+``chore(main): release <version>`` and the diff is by construction every path
+since the last tag. So any ``src/**`` change in a release interval made the
+"hidden type + user-visible path" row reject the proposal with no way out --
+the type cannot be retyped and the diff cannot be narrowed. That is what froze
+#133; #119 and #126 had been closed by hand for the same reason.
+
+The protection this gate exists to provide is NOT lost, because for a proposal
+it belongs to ``scripts/check_release_pr_guard.py`` (issue #122), which
+auto-freezes internal-only proposals.  That is only true because #122's guard
+recognises proposals too, which it could not do until the author check was
+replaced there as well.
+
+IDENTITY IS NOT A SIGNAL (the #137 lesson)
+-------------------------------------------
+The first version of this exemption required ``author`` to be a release-please
+bot, copied from #122's guard.  It never fired.  Measured on the real #137
+proposal: release-please opens its PR with the repo's own credentials, so
+``github.event.pull_request.user.login`` is the account owner (``1StepMore``),
+not ``github-actions[bot]``.  The author changes with whichever token
+release-please runs under, so no hard-coded allowlist can be correct.
+
+The same wrong assumption made #122's auto-freeze inert, which is the real
+reason behind #129's complaint that "the guard ... never fired".  Both gates now
+key on content: the branch prefix, the title prefix, and the release plumbing a
+genuine proposal rewrites.  Spoofing then requires editing ``CHANGELOG.md`` and
+the version file, which is deliberate and obvious rather than a branch rename.
+
+DEPENDABOT LOCKFILE EXEMPTION (issues #167-#170)
+----------------------------------------------
+Dependabot's pip pull requests are titled ``chore(deps): bump X from A to B`` -- a
+HIDDEN type -- while the ``uv`` manager's diff is ``uv.lock`` alone, which this
+gate must classify as user-visible (``uv.lock`` is the reproducibility record for
+every install, so it stays out of ``INTERNAL_PREFIXES`` on purpose).  The two
+failings collide and the row hard-fails with no way out short of a hand-added
+``release:skip`` label: Dependabot cannot retype its own title, and the diff
+cannot be narrowed.  ``git log --author=dependabot`` shows no pip bump has ever
+landed, so 100% of Dependabot pip PRs have been blocked since this gate shipped.
+
+This exemption is deliberately NARROWER than :func:`is_release_proposal`:
+
+1. the head branch must live in the BASE repository (``head.repo.full_name ==
+   repository``).  That is a structural fact about where the ref exists, not a
+   credential, so the #137 "identity is not a signal" trap does not apply -- but
+   it does bound the spoof: the repo is public, so a fork PR named
+   ``dependabot/uv/...`` is a real attempt, its ``head.repo.full_name`` differs,
+   and the exemption is denied.  A deleted fork yields null -> "" -> denied.
+2. the ``dependabot/`` branch prefix.  Both ``dependabot/uv/...`` and
+   ``dependabot/pip/...`` are in live use, so the PREFIX is the signal, not an
+   ecosystem segment.
+3. EVERY changed path is the generated lockfile -- not merely "includes" it.  A
+   Dependabot PR that also touches ``src/**`` is judged normally.
+4. the title type is hidden, enforced at the call site.  This one does NOT
+   change the verdict for a visible type -- ``uv.lock`` is user-visible, so
+   ``fix(deps)`` over a lock-only diff agrees with it and passes either way,
+   which is correct: a real dependency fix deserves a release.  What the guard
+   prevents is the exemption *supplying a false reason* for that pass.  Without
+   it, ``fix(deps)`` on a lock-only diff would be admitted with the message
+   "a hidden type is correct", which is untrue and would mislead whoever reads
+   the gate output.  :func:`is_release_proposal` has no such guard.
+
+``pyproject.toml`` is NOT on the allowlist and must not be.  It is the install
+contract and it ships in the sdist, so a manifest bump is a real user-visible
+change that must be retyped ``fix(deps)`` by a human (#172).  See
+:data:`DEPENDABOT_LOCK_ONLY_PATHS`.
 """
 
 from __future__ import annotations
@@ -26,6 +95,13 @@ HIDDEN_TYPES = frozenset({"chore", "ci", "test", "refactor", "build", "style"})
 
 USER_VISIBLE_LABEL = "release:user-visible"
 SKIP_LABEL = "release:skip"
+
+RELEASE_HEAD_PREFIX = "release-please--"
+RELEASE_TITLE_PREFIX = "chore(main): release "
+# A real release-please proposal always rewrites the changelog and the version
+# file. Requiring both is what makes the exemption content-based rather than
+# identity-based; see is_release_proposal.
+REQUIRED_RELEASE_PLUMBING = ("CHANGELOG.md", "src/automedia/_version.py")
 # The freeze in release-pr-guard.yml applies the release-please snooze label, not
 # SKIP_LABEL. Accepting both keeps the two gates satisfiable by the same action: a
 # guard-driven freeze must not leave this gate red. See issue #122.
@@ -60,6 +136,19 @@ INTERNAL_EXACT = frozenset(
 
 MAX_LISTED_PATHS = 10
 
+# Source-generated files that are not user-visible content. Admission requires all
+# three: produced by a checked-in generator, byte-diff-gated in CI so it cannot
+# drift from that generator, and containing no human-authored prose.
+#
+# `docs/doc-inventory.md` qualifies: scripts/doc_inventory.py generates it, ci.yml
+# gates it byte-for-byte ("Doc inventory drift check (T-13)"), and ADR-005 requires
+# it to land in the same commit as whatever made it stale. Without this entry, any
+# change that adds a doc drags the regenerated index into the diff and reads as
+# user-visible, so internal-only work has to carry a `release:skip` label to say
+# "I changed nothing a user would notice". Hand-written docs (docs/user/**,
+# docs/index.md, README.md) are deliberately NOT listed.
+GENERATED_ARTIFACTS = frozenset({"docs/doc-inventory.md"})
+
 
 class Result(NamedTuple):
     """Verdict for one PR: ``passed`` plus a human ``reason``/``remediation``."""
@@ -78,7 +167,7 @@ def is_internal_path(path: str) -> bool:
     normalized = path.strip()
     while normalized.startswith("./"):
         normalized = normalized[2:]
-    if normalized in INTERNAL_EXACT:
+    if normalized in INTERNAL_EXACT or normalized in GENERATED_ARTIFACTS:
         return True
     return normalized.startswith(INTERNAL_PREFIXES)
 
@@ -105,16 +194,105 @@ def _format_paths(paths: list[str]) -> str:
     return shown
 
 
+def is_release_proposal(head_ref: str, title: str, paths: list[str]) -> bool:
+    """True only for a real release-please proposal: bot branch, bot title, real plumbing.
+
+    The author is deliberately NOT a signal.  release-please creates its PR with
+    the repo's own credentials, so ``user.login`` is the account owner
+    (``1StepMore`` here), not ``github-actions[bot]``; it changes with whichever
+    token release-please runs under.  An earlier version keyed on the author and
+    therefore never fired -- see the module docstring.
+
+    The three stable signals are the branch prefix, the title prefix, and the
+    release plumbing.  Requiring the plumbing matters more here than in
+    check_release_pr_guard.py: a false positive in THIS gate unblocks a release,
+    so a spoof must also rewrite ``CHANGELOG.md`` and the version file, which is
+    conspicuous and self-incriminating rather than a one-line branch rename.
+    """
+    if not head_ref.startswith(RELEASE_HEAD_PREFIX):
+        return False
+    if not title.startswith(RELEASE_TITLE_PREFIX):
+        return False
+    changed = set(paths)
+    return all(p in changed for p in REQUIRED_RELEASE_PLUMBING)
+
+
+# --- Dependabot lockfile refresh (issue #167-#170) -------------------------
+# See the module docstring. The author/login is deliberately NOT a signal here
+# either (the #137 lesson): `head.repo.full_name == github.repository` is a
+# structural fact about where the ref exists, which a fork cannot fake, and an
+# empty value (flag omitted) denies the exemption rather than granting it.
+DEPENDABOT_HEAD_PREFIX = "dependabot/"
+# uv.lock only, and pinned by tests/test_check_release_scope.py. pyproject.toml
+# is deliberately absent: it is the install contract and ships in the sdist, so a
+# manifest bump is a real user-visible change that must be retyped fix(deps)
+# by a human (#172). Adding it here would be the one edit that silently grants a
+# release skip for install-surface changes.
+DEPENDABOT_LOCK_ONLY_PATHS = frozenset({"uv.lock"})
+
+
+def is_lockfile_refresh(head_ref: str, head_repo: str, base_repo: str, paths: list[str]) -> bool:
+    """True only for a Dependabot PR whose entire diff is the generated lockfile."""
+    if not head_repo or head_repo != base_repo:
+        return False
+    if not head_ref.startswith(DEPENDABOT_HEAD_PREFIX):
+        return False
+    normalized = {p.strip().removeprefix("./") for p in paths if p.strip()}
+    return bool(normalized) and normalized <= DEPENDABOT_LOCK_ONLY_PATHS
+
+
 def assess_release_scope(
     paths: list[str],
     title_type: str | None,
     labels: list[str],
+    *,
+    author: str = "",
+    head_ref: str = "",
+    title: str = "",
+    head_repo: str = "",
+    base_repo: str = "",
 ) -> Result:
-    """Judge one PR against the four-row release-scope table."""
+    """Judge one PR against the four-row release-scope table.
+
+    A release-please proposal short-circuits to a pass (issue #134): its type is
+    fixed by the bot and its diff spans the whole release interval, so the table
+    has no verdict to give.  See :func:`is_release_proposal` and the module
+    docstring for why that does not weaken the internal-only protection.
+
+    A Dependabot lockfile refresh short-circuits for the same reason -- its type
+    is fixed by the bot and it cannot retype itself -- but only under the four
+    conditions in :func:`is_lockfile_refresh`.
+
+    ``author`` is accepted but NOT used for the decision -- see
+    :func:`is_release_proposal`.  It stays in the signature so existing callers
+    and the workflow keep working.  ``head_repo``/``base_repo`` default to the
+    empty string, which DENIES the lockfile exemption: a caller that forgets to
+    plumb them gets the strict pre-fix verdict rather than a silent pass.
+    """
     label_set = {label.strip() for label in labels if label and label.strip()}
 
     if not paths:
         return Result(True, "No changed files to judge.", "")
+
+    if is_release_proposal(head_ref, title, paths):
+        return Result(
+            True,
+            f"release-please proposal (branch '{head_ref}'): its type is bot-fixed "
+            "and its diff spans the whole release interval, so the type-vs-scope "
+            "table does not apply. Internal-only proposals are auto-frozen by "
+            "check_release_pr_guard.py (issue #122).",
+            "",
+        )
+
+    if title_type in HIDDEN_TYPES and is_lockfile_refresh(head_ref, head_repo, base_repo, paths):
+        return Result(
+            True,
+            f"Dependabot lockfile refresh (branch '{head_ref}') touching only "
+            f"{_format_paths(sorted(set(paths)))}: the diff is a generated "
+            "lockfile that ships in neither the wheel nor the sdist, so a "
+            "hidden type is correct and no release entry is owed.",
+            "",
+        )
 
     known = VISIBLE_TYPES | HIDDEN_TYPES
     if title_type is None or title_type not in known:
@@ -212,6 +390,40 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Comma-separated PR label names (may be empty).",
     )
+    parser.add_argument(
+        "--pr-author",
+        default="",
+        help=(
+            "PR author login. Omitted means no release-proposal exemption "
+            "applies, preserving the strict verdict (issue #134)."
+        ),
+    )
+    parser.add_argument(
+        "--head-ref",
+        default="",
+        help=(
+            "PR head branch. Together with --pr-author and the title prefix "
+            "this identifies a release-please proposal (issue #134)."
+        ),
+    )
+    parser.add_argument(
+        "--head-repo",
+        default="",
+        help=(
+            "owner/repo of the PR head (github.event.pull_request.head.repo."
+            "full_name). Must equal --base-repo for the Dependabot lockfile "
+            "exemption (issues #167-#170). Empty means no exemption applies, "
+            "preserving the strict verdict."
+        ),
+    )
+    parser.add_argument(
+        "--base-repo",
+        default="",
+        help=(
+            "owner/repo of the base branch (github.repository), the reference "
+            "--head-repo is compared against."
+        ),
+    )
     return parser
 
 
@@ -226,7 +438,16 @@ def main(argv: list[str] | None = None) -> int:
 
     paths = _read_paths(args)
     title_type = parse_title_type(args.title)
-    result = assess_release_scope(paths, title_type, _parse_labels(args.labels))
+    result = assess_release_scope(
+        paths,
+        title_type,
+        _parse_labels(args.labels),
+        author=args.pr_author,
+        head_ref=args.head_ref,
+        title=args.title,
+        head_repo=args.head_repo,
+        base_repo=args.base_repo,
+    )
 
     stream = sys.stdout if result.passed else sys.stderr
     print(result.reason, file=stream)

@@ -95,13 +95,29 @@ engines:
       host: 127.0.0.1
       port: 8188
       protocol: http
-      timeout: 300
+      timeout: 900
       negative_prompt: blurry, low quality, distorted
+      base_size: 512
+      upscale_model: RealESRGAN_x4plus.pth
+      # Absolute path to the ComfyUI `models/` directory. Only read by
+      # `automedia doctor` so it can verify the upscale model exists; the
+      # engine lets ComfyUI resolve the file itself. Leave null when
+      # ComfyUI runs remotely or in Docker.
+      comfyui_models_path: null
       workflow_path: null
   video:
     default: hyperframes
     hyperframes:
       quality: high
+      # Absolute path to the hyperframes executable (e.g. /usr/local/bin/hyperframes)
+      # or to a per-project install's dist/cli.js (invoked via node). Unset by default.
+      cli_path: null
+      # Explicit command array for per-project installs, e.g. ["npx", "hyperframes"]
+      # or ["node", "/abs/path/to/dist/cli.js"]. Takes precedence over cli_path.
+      cli_command: null
+      # Must be a Linux Chrome/Chromium binary (e.g. Playwright's chrome-linux64/chrome).
+      # A Windows Chrome binary will fail (puppeteer reports "Invalid argument").
+      # Injected as HYPERFRAMES_BROWSER_PATH.
       chrome_path: null
 
 pipeline:
@@ -111,11 +127,6 @@ pipeline:
     enabled: true
   image:
     enabled: true
-    comfyui:
-      host: 127.0.0.1
-      port: 8188
-      protocol: http
-      timeout: 300
   text:
     enabled: true
 

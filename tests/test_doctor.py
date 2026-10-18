@@ -131,12 +131,24 @@ class TestDoctorChromeHeadless:
 class TestDoctorCheckDependencies:
     """Full check_dependencies integration."""
 
+    @pytest.fixture(autouse=True)
+    def _no_hyperframes(self):
+        """Isolate chrome resolution: without this, the real hyperframes binary
+        (when installed) would win over the mocked ``_resolve_path``."""
+        with patch.object(Doctor, "_hyperframes_browser_path", return_value=None):
+            yield
+
     def test_all_installed(self, doctor: Doctor):
         """All tools found — returns installed=True for each."""
         with (
             patch.object(doctor, "_resolve_path", return_value="/usr/bin/ok"),
             patch.object(doctor, "_get_version", return_value="1.0"),
             patch.object(doctor, "_check_comfyui_http", return_value=(True, "ComfyUI reachable")),
+            patch.object(
+                doctor,
+                "_check_comfyui_upscale_model",
+                return_value=(True, "upscale model present"),
+            ),
             patch.object(doctor, "_check_llm_api", return_value=(True, "API reachable")),
             patch.object(doctor, "_check_chrome_headless", return_value=(True, None)),
         ):
@@ -154,6 +166,10 @@ class TestDoctorCheckDependencies:
                     assert dep["version"] is None
                     assert dep["headless_ok"] is True
                     assert dep.get("headless_message") is None
+                elif dep["name"] == "comfyui_upscale_model":
+                    assert dep["path"] is None
+                    assert dep["version"] is None
+                    assert dep["model_present"] is True
                 else:
                     assert dep["path"] == "/usr/bin/ok"
                     assert dep["version"] == "1.0"
@@ -163,6 +179,11 @@ class TestDoctorCheckDependencies:
         with (
             patch.object(doctor, "_resolve_path", return_value=None),
             patch.object(doctor, "_check_comfyui_http", return_value=(False, None)),
+            patch.object(
+                doctor,
+                "_check_comfyui_upscale_model",
+                return_value=(False, "upscale model missing"),
+            ),
             patch.object(doctor, "_check_llm_api", return_value=(False, "no API key")),
         ):
             results = doctor.check_dependencies()
@@ -172,6 +193,8 @@ class TestDoctorCheckDependencies:
                 if dep["name"] == "chrome":
                     assert dep["headless_ok"] is False
                     assert dep.get("headless_message") is None
+                if dep["name"] == "comfyui_upscale_model":
+                    assert dep["model_present"] is False
                 assert dep["version"] is None or dep["name"] == "llm_api"
 
     def test_partial_installation(self, doctor: Doctor):
@@ -185,6 +208,11 @@ class TestDoctorCheckDependencies:
             patch.object(doctor, "_resolve_path", side_effect=mock_resolve),
             patch.object(doctor, "_get_version", return_value="1.0"),
             patch.object(doctor, "_check_comfyui_http", return_value=(False, None)),
+            patch.object(
+                doctor,
+                "_check_comfyui_upscale_model",
+                return_value=(False, "upscale model missing"),
+            ),
             patch.object(doctor, "_check_llm_api", return_value=(False, "no API key")),
         ):
             results = doctor.check_dependencies()
@@ -195,6 +223,7 @@ class TestDoctorCheckDependencies:
         assert "whisper" in missing
         assert "edge-tts" in missing
         assert "comfyui" in missing
+        assert "comfyui_upscale_model" in missing
         assert "chrome" in missing
         assert "llm_api" in missing
 
@@ -204,6 +233,11 @@ class TestDoctorCheckDependencies:
             patch.object(doctor, "_resolve_path", return_value="/usr/bin/python3"),
             patch.object(doctor, "_get_version", return_value="3.11"),
             patch.object(doctor, "_check_comfyui_http", return_value=(True, "ok")),
+            patch.object(
+                doctor,
+                "_check_comfyui_upscale_model",
+                return_value=(True, "present"),
+            ),
             patch.object(doctor, "_check_llm_api", return_value=(True, "API reachable")),
         ):
             results = doctor.check_dependencies()
@@ -216,6 +250,9 @@ class TestDoctorCheckDependencies:
             if dep["name"] == "chrome":
                 assert "headless_ok" in dep
                 assert "headless_message" in dep
+            if dep["name"] == "comfyui_upscale_model":
+                assert "model_present" in dep
+                assert "model_message" in dep
             assert isinstance(dep["installed"], bool)
 
     def test_get_headless_chrome_instructions(self, doctor: Doctor):
@@ -255,3 +292,205 @@ class TestDoctorPythonResolution:
         )
         assert python_dep["path"] is not None
         assert "python" in python_dep["path"].lower()
+
+
+class TestDoctorComfyuiUpscaleModel:
+    """The ComfyUI upscale model is a hard runtime requirement since the
+    built-in workflow generates at native resolution and upscales with it.
+
+    The engine deliberately does NOT degrade silently when the model is
+    missing — ComfyUI errors and the pipeline raises. This check exists so
+    users learn that up front via ``automedia doctor``.
+    """
+
+    @staticmethod
+    def _config(models_path=None, model="RealESRGAN_x4plus.pth"):
+        return {
+            "engines": {
+                "image": {"comfyui": {"comfyui_models_path": models_path, "upscale_model": model}}
+            }
+        }
+
+    def test_reports_present_when_file_exists(self, doctor: Doctor, tmp_path):
+        d = tmp_path / "upscale_models"
+        d.mkdir()
+        (d / "RealESRGAN_x4plus.pth").write_bytes(b"x")
+        with patch(
+            "automedia.core.config_loader.load_config", return_value=self._config(str(tmp_path))
+        ):
+            ok, msg = doctor._check_comfyui_upscale_model()
+        assert ok is True
+        assert "present" in msg
+
+    def test_reports_missing_when_path_set_but_absent(self, doctor: Doctor, tmp_path):
+        with patch(
+            "automedia.core.config_loader.load_config", return_value=self._config(str(tmp_path))
+        ):
+            ok, msg = doctor._check_comfyui_upscale_model()
+        assert ok is False
+        assert "missing" in msg
+
+    def test_unverifiable_when_models_path_unset(self, doctor: Doctor):
+        """No configured path must NOT be reported as a failure.
+
+        ComfyUI may run remotely or in Docker, so a guess would produce
+        false alarms. Tri-state ``None`` is the only honest answer.
+        """
+        with patch("automedia.core.config_loader.load_config", return_value=self._config(None)):
+            ok, msg = doctor._check_comfyui_upscale_model()
+        assert ok is None
+        assert "comfyui_models_path" in msg
+
+    def test_unverifiable_is_not_reported_as_broken(self, doctor: Doctor):
+        """check_dependencies must not raise a false 'not installed' alarm.
+
+        This is the regression guard: ``installed`` is computed as
+        ``ok is not False`` precisely so an unverifiable model stays quiet.
+        """
+        with (
+            patch.object(doctor, "_resolve_path", return_value="/usr/bin/ok"),
+            patch.object(doctor, "_get_version", return_value="1.0"),
+            patch.object(doctor, "_check_comfyui_http", return_value=(True, "ok")),
+            patch.object(doctor, "_check_llm_api", return_value=(True, "ok")),
+            patch.object(doctor, "_check_chrome_headless", return_value=(True, None)),
+            patch("automedia.core.config_loader.load_config", return_value=self._config(None)),
+        ):
+            results = doctor.check_dependencies()
+        dep = next(r for r in results if r["name"] == "comfyui_upscale_model")
+        assert dep["model_present"] is None
+        assert dep["installed"] is True
+
+    def test_custom_model_name_respected(self, doctor: Doctor, tmp_path):
+        """A user-configured upscale_model must be checked, not the default."""
+        d = tmp_path / "upscale_models"
+        d.mkdir()
+        (d / "custom_x2.pth").write_bytes(b"x")
+        cfg = self._config(str(tmp_path), model="custom_x2.pth")
+        with patch("automedia.core.config_loader.load_config", return_value=cfg):
+            ok, _ = doctor._check_comfyui_upscale_model()
+        assert ok is True
+
+    def test_install_instructions_exist(self, doctor: Doctor):
+        assert doctor.get_install_instructions("comfyui_upscale_model") is not None
+
+
+class TestDoctorChromeResolution:
+    """Issue #227: chrome is resolved via hyperframes (the render authority)."""
+
+    def test_hyperframes_path_preferred(self, doctor: Doctor):
+        with (
+            patch.object(
+                Doctor,
+                "_hyperframes_browser_path",
+                return_value="/opt/hf/chrome-headless-shell",
+            ),
+            patch.object(doctor, "_resolve_path", return_value="/usr/bin/google-chrome"),
+        ):
+            assert doctor._resolve_chrome() == "/opt/hf/chrome-headless-shell"
+
+    def test_falls_back_to_path_when_hyperframes_missing(self, doctor: Doctor):
+        with (
+            patch.object(Doctor, "_hyperframes_browser_path", return_value=None),
+            patch.object(doctor, "_resolve_path", return_value="/usr/bin/chromium"),
+        ):
+            assert doctor._resolve_chrome() == "/usr/bin/chromium"
+
+    def test_hyperframes_browser_path_returns_existing_last_line(self, tmp_path):
+        binary = tmp_path / "chrome-headless-shell"
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        result = MagicMock(returncode=0, stdout=f"banner line\n{binary}\n", stderr="")
+        with (
+            patch("automedia.core.doctor.shutil.which", return_value="/usr/bin/hyperframes"),
+            patch("automedia.core.doctor.subprocess.run", return_value=result),
+        ):
+            assert Doctor._hyperframes_browser_path() == str(binary)
+
+    def test_hyperframes_browser_path_none_when_absent(self):
+        with patch("automedia.core.doctor.shutil.which", return_value=None):
+            assert Doctor._hyperframes_browser_path() is None
+
+    def test_hyperframes_browser_path_none_on_failure(self):
+        result = MagicMock(returncode=1, stdout="", stderr="no browser")
+        with (
+            patch("automedia.core.doctor.shutil.which", return_value="/usr/bin/hyperframes"),
+            patch("automedia.core.doctor.subprocess.run", return_value=result),
+        ):
+            assert Doctor._hyperframes_browser_path() is None
+
+    def test_hyperframes_browser_path_none_when_reported_path_missing(self):
+        result = MagicMock(returncode=0, stdout="/does/not/exist\n", stderr="")
+        with (
+            patch("automedia.core.doctor.shutil.which", return_value="/usr/bin/hyperframes"),
+            patch("automedia.core.doctor.subprocess.run", return_value=result),
+        ):
+            assert Doctor._hyperframes_browser_path() is None
+
+
+class TestDoctorChromeRemediation:
+    """Issue #227: WSL must get Linux-Chrome guidance, not irrelevant apt libs."""
+
+    def test_wsl_windows_shim_points_at_linux_chrome(self, tmp_path):
+        shim = tmp_path / "google-chrome"
+        shim.write_text(
+            '#!/bin/bash\nexec "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" "$@"\n',
+            encoding="utf-8",
+        )
+        dep = {
+            "name": "chrome",
+            "installed": True,
+            "path": str(shim),
+            "headless_ok": False,
+            "headless_message": "Invalid argument",
+        }
+        with patch.object(Doctor, "_is_wsl", return_value=True):
+            msg = Doctor.chrome_remediation(dep)
+        assert msg is not None
+        assert "Linux Chrome" in msg
+        assert "hyperframes browser ensure" in msg
+        assert "libnss3" not in msg
+
+    def test_wsl_no_browser_mentions_linux_chrome(self):
+        dep = {
+            "name": "chrome",
+            "installed": False,
+            "path": None,
+            "headless_ok": False,
+            "headless_message": None,
+        }
+        with patch.object(Doctor, "_is_wsl", return_value=True):
+            msg = Doctor.chrome_remediation(dep)
+        assert msg is not None
+        assert "Linux Chrome" in msg
+
+    def test_non_wsl_headless_failure_uses_headless_deps(self):
+        dep = {
+            "name": "chrome",
+            "installed": True,
+            "path": "/usr/bin/google-chrome",
+            "headless_ok": False,
+            "headless_message": "missing lib",
+        }
+        with patch.object(Doctor, "_is_wsl", return_value=False):
+            msg = Doctor.chrome_remediation(dep)
+        assert msg is not None
+        assert "libnss3" in msg
+
+    def test_healthy_chrome_has_no_remediation(self):
+        dep = {
+            "name": "chrome",
+            "installed": True,
+            "path": "/opt/hf/shell",
+            "headless_ok": True,
+            "headless_message": None,
+        }
+        assert Doctor.chrome_remediation(dep) is None
+
+    def test_windows_side_path_detection(self, tmp_path):
+        assert Doctor._is_windows_side_chrome(
+            "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe"
+        )
+        assert Doctor._is_windows_side_chrome(r"C:\Program Files\Google\Chrome\chrome.exe")
+        shim = tmp_path / "google-chrome"
+        shim.write_text('exec "chrome.exe" "$@"\n', encoding="utf-8")
+        assert Doctor._is_windows_side_chrome(str(shim))
+        assert not Doctor._is_windows_side_chrome("/usr/bin/google-chrome")
