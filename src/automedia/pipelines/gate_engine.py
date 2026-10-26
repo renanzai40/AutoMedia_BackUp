@@ -55,6 +55,18 @@ def _hitl_project_dir(gate_context: GateContext | dict[str, Any]) -> str:
 _PERMANENT_EXCEPTIONS: tuple[type[Exception], ...] = (KeyError, ValueError, TypeError, GateError)
 _TRANSIENT_EXCEPTIONS: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)
 
+
+def _verdict_from_results(results: list[dict[str, Any]]) -> bool:
+    """Return ``True`` only when every executed gate ended in a passing state.
+
+    A gate that was skipped for missing inputs reports ``passed=True``
+    (``gates/_result.missing_input_result``), so skipped gates do not fail the
+    run.  A retry-mode gate that exhausted its retries leaves ``passed=False``
+    and therefore fails the run even though the engine kept executing.
+    """
+    return all(r.get("passed", True) for r in results)
+
+
 # Content gates whose failing results may apply ``modified_content`` into the
 # main content flow (quality-retry branch).  G0 (fact check), G1 (humanizer)
 # and G2 (copy review) are ``failure_mode="retry"`` gates that emit
@@ -134,6 +146,13 @@ class GateLogEntry:
     status: Literal["passed", "failed", "error", "skipped"]
     duration_s: float
     error: str | None = None
+    #: Why a gate was skipped, in the gate's own words (issue #285).  A skip
+    #: is a first-class status, and "the gate did not run" is only honest when
+    #: the report can also say WHY: a missing input key set, HyperFrames being
+    #: absent, and ``--skip-review`` are three different facts an operator must
+    #: be able to tell apart.  ``None`` for non-skipped gates and for older
+    #: persisted rows that never recorded one.
+    skip_reason: str | None = None
 
 
 @dataclass
@@ -360,7 +379,15 @@ class GateEngine:
         log.debug("hooks.dispatch_before", gate_name=gate_name, hook_count=len(self._hooks))
         ctx = context.to_dict() if isinstance(context, GateContext) else context
         for hook in self._hooks:
-            hook.before_gate(gate_name, ctx)
+            try:
+                hook.before_gate(gate_name, ctx)
+            except Exception as exc:
+                log.warning(
+                    "hooks.before_failed",
+                    hook=type(hook).__name__,
+                    gate_name=gate_name,
+                    error=str(exc),
+                )
 
     def _dispatch_after(
         self, gate_name: str, context: GateContext | dict[str, Any], result: dict[str, Any]
@@ -369,7 +396,15 @@ class GateEngine:
         log.debug("hooks.dispatch_after", gate_name=gate_name, hook_count=len(self._hooks))
         ctx = context.to_dict() if isinstance(context, GateContext) else context
         for hook in self._hooks:
-            hook.after_gate(gate_name, ctx, result)
+            try:
+                hook.after_gate(gate_name, ctx, result)
+            except Exception as exc:
+                log.warning(
+                    "hooks.after_failed",
+                    hook=type(hook).__name__,
+                    gate_name=gate_name,
+                    error=str(exc),
+                )
 
     def _dispatch_failed(
         self, gate_name: str, context: GateContext | dict[str, Any], error: Exception
@@ -383,7 +418,15 @@ class GateEngine:
         )
         ctx = context.to_dict() if isinstance(context, GateContext) else context
         for hook in self._hooks:
-            hook.on_gate_failed(gate_name, ctx, error)
+            try:
+                hook.on_gate_failed(gate_name, ctx, error)
+            except Exception as exc:
+                log.warning(
+                    "hooks.failed_failed",
+                    hook=type(hook).__name__,
+                    gate_name=gate_name,
+                    error=str(exc),
+                )
 
     def _gate_requires_approval(
         self, gate_name: str, gate_context: GateContext | dict[str, Any]
@@ -671,7 +714,7 @@ class GateEngine:
         Guarded: never creates md5 state as a side effect.
         """
         try:
-            from automedia.hooks.md5_tracker import get_pipeline_md5, record_md5
+            from automedia.core.md5_tracker import get_pipeline_md5, record_md5
 
             project_dir = gate_context.get("project_dir", "")
             if project_dir and get_pipeline_md5(project_dir).get("gates", {}).get("CW"):
@@ -894,10 +937,9 @@ class GateEngine:
         early_stop: bool = True,
         progress: PipelineProgress | None = None,
     ) -> tuple[bool, list[dict[str, Any]]] | list[dict[str, Any]]:
-        """Execute gates sequentially. Returns ``(all_ok, results)`` when
+        """Execute gates sequentially. Returns ``(success, results)`` when
         *early_stop* is ``True``, or just *results* when ``False``."""
         results: list[dict[str, Any]] = []
-        all_ok = True
         total_gates = len(self._gates)
 
         _gate_loop_idx = 0
@@ -990,7 +1032,7 @@ class GateEngine:
                     )
                     if hitl_outcome == "parked":
                         if early_stop:
-                            return all_ok, results
+                            return _verdict_from_results(results), results
                         return results
 
                 passed = result.get("passed", True)
@@ -1000,11 +1042,9 @@ class GateEngine:
                     )
 
                 if passed:
-                    all_ok = True
                     log.info("gate.passed", gate_name=gate_name, duration_s=duration)
                     self._dispatch_after(gate_name, gate_context, result)
                 else:
-                    all_ok = False
                     log.warning(
                         "gate.failed",
                         gate_name=gate_name,
@@ -1012,6 +1052,7 @@ class GateEngine:
                         failure_mode=fm,
                     )
                     if fm == "stop":
+                        self._dispatch_after(gate_name, gate_context, result)
                         if early_stop:
                             return False, results
                         return results
@@ -1080,7 +1121,7 @@ class GateEngine:
                                 )
                                 if hitl_outcome == "parked":
                                     if early_stop:
-                                        return all_ok, results
+                                        return _verdict_from_results(results), results
                                     return results
 
                             passed = result.get("passed", True)
@@ -1095,7 +1136,6 @@ class GateEngine:
                                 )
 
                             if passed:
-                                all_ok = True
                                 log.info(
                                     "gate.passed",
                                     gate_name=gate_name,
@@ -1113,7 +1153,6 @@ class GateEngine:
 
                         except _PERMANENT_EXCEPTIONS as exc:
                             duration = time.monotonic() - start
-                            all_ok = False
                             tb = traceback.format_exc()
                             log.error(
                                 "gate.quality_retry.error.permanent",
@@ -1150,7 +1189,6 @@ class GateEngine:
 
                         except _TRANSIENT_EXCEPTIONS as exc:
                             duration = time.monotonic() - start
-                            all_ok = False
                             tb = traceback.format_exc()
                             log.error(
                                 "gate.quality_retry.error.transient",
@@ -1218,7 +1256,6 @@ class GateEngine:
                             raise
 
                     if not passed:
-                        all_ok = False
                         # Retries exhausted — undo any applied rewrite so the
                         # failed chain leaves no partial write behind.
                         self._rollback_applied_content(gate_context, _rewrite_apply_state, result)
@@ -1294,7 +1331,6 @@ class GateEngine:
 
             except _PERMANENT_EXCEPTIONS as exc:
                 duration = time.monotonic() - start
-                all_ok = False
                 tb = traceback.format_exc()
                 log.error(
                     "gate.error.permanent",
@@ -1320,7 +1356,6 @@ class GateEngine:
 
             except _TRANSIENT_EXCEPTIONS as exc:
                 duration = time.monotonic() - start
-                all_ok = False
                 tb = traceback.format_exc()
                 log.error(
                     "gate.error.transient",
@@ -1352,7 +1387,6 @@ class GateEngine:
             except Exception as exc:
                 # Unknown error during gate execution — log, record, stop pipeline
                 duration = time.monotonic() - start
-                all_ok = False
                 tb = traceback.format_exc()
                 log.error(
                     "gate.error.unknown",
@@ -1411,7 +1445,7 @@ class GateEngine:
             _gate_loop_idx += 1
 
         if early_stop:
-            return all_ok, results
+            return _verdict_from_results(results), results
         return results
 
     # ------------------------------------------------------------------
@@ -1438,9 +1472,11 @@ class GateEngine:
         Returns
         -------
         tuple[bool, list[dict]]
-            ``(success, results)`` where *success* is ``True`` when
-            every gate passed (or no ``failure_mode="stop"`` gate failed),
-            and *results* is the list of per-gate result dicts.
+            ``(success, results)`` where *success* is ``True`` only when every
+            executed gate ended in a passing state.  A retry-mode gate that
+            exhausted its retries fails the run even though the engine kept
+            executing later gates; only a level-2 escalation that H0 approved
+            overrides that.  *results* is the list of per-gate result dicts.
         """
         # Wire level 2 handler when regeneration is enabled
         _local_max_regen = gate_context.get(  # type: ignore[typeddict-unknown-key]  # max_regenerations not a known key in GateContext TypedDict
@@ -1472,242 +1508,6 @@ class GateEngine:
             if progress:
                 progress.mark_finished()
         return result  # type: ignore[return-value]  # _run() return is union; cannot narrow on early_stop param
-
-    def run_sub_pipeline(
-        self,
-        gate_names: list[str],
-        gate_context: GateContext | dict[str, Any],
-        *,
-        sub_pipeline_name: str | None = None,
-        progress: PipelineProgress | None = None,
-    ) -> dict[str, Any]:
-        """Run a named sequence of gates as a sub-pipeline within a parent pipeline.
-
-        Looks up each gate by name from the engine's gate list and executes them
-        sequentially using :meth:`_execute_gate_with_retry`.  Progress is tracked
-        in ``gate_context["sub_pipelines"][name]`` so the parent pipeline and
-        hooks can observe sub-pipeline state.
-
-        If a gate with ``failure_mode="stop"`` fails, the sub-pipeline halts
-        immediately and returns ``passed=False``.  Gates with
-        ``failure_mode="retry"`` are retried via the tenacity wrapper within the
-        sub-pipeline context.  Exceptions during gate execution terminate the
-        sub-pipeline.
-
-        Parameters
-        ----------
-        gate_names:
-            Ordered list of gate names to execute
-            (e.g. ``["D1", "D2", "D3"]``).
-        gate_context:
-            Pipeline context shared with the parent pipeline.  Sub-pipeline
-            state is stored in ``gate_context["sub_pipelines"][name]``.
-        sub_pipeline_name:
-            Optional identifier for this sub-pipeline.  Defaults to the first
-            gate name when not provided.
-        progress:
-            Optional progress tracker forwarded to individual gate execution.
-
-        Returns
-        -------
-        dict
-            ``{"passed": bool, "gate_results": list[dict], "failed_gate": str | None}``
-            where *passed* is ``True`` when every gate completed successfully,
-            *gate_results* is a list of per-gate result dicts, and *failed_gate*
-            is the name of the first failing gate (or ``None`` when all passed).
-
-        Raises
-        ------
-        ValueError
-            If any gate name in *gate_names* is not found in the engine's
-            gate list.
-        """
-        sp_name = sub_pipeline_name or (gate_names[0] if gate_names else "__unnamed__")
-
-        # Initialize sub-pipeline tracking in context.extra
-        sub_pipelines: dict[str, Any] = gate_context.setdefault("sub_pipelines", {})  # type: ignore[typeddict-unknown-key]
-        sp_state: dict[str, Any] = sub_pipelines.setdefault(sp_name, {})
-        sp_state.update(
-            {
-                "status": "running",
-                "gates_completed": [],
-                "current_gate": None,
-                "gate_names": list(gate_names),
-            }
-        )
-
-        # Build name → gate lookup from the engine's gate list
-        gate_map: dict[str, BaseGate] = {g.gate_name: g for g in self._gates}
-        missing = [n for n in gate_names if n not in gate_map]
-        if missing:
-            raise ValueError(
-                f"Gates not found in engine gate list: {missing}. Available: {list(gate_map)}"
-            )
-
-        gate_results: list[dict[str, Any]] = []
-        failed_gate: str | None = None
-
-        for gate_name in gate_names:
-            gate = gate_map[gate_name]
-            sp_state["current_gate"] = gate_name
-
-            # Resolve failure mode (backward compat: "rewrite" → "retry")
-            fm = gate.failure_mode
-            if fm == "rewrite":
-                warnings.warn(
-                    f"failure_mode='rewrite' is deprecated for gate '{gate_name}', "
-                    f"use failure_mode='retry' instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                fm = "retry"
-
-            log.info(
-                "sub_pipeline.gate.start",
-                gate_name=gate_name,
-                sub_pipeline=sp_name,
-                failure_mode=fm,
-            )
-
-            start = time.monotonic()
-            try:
-                result = self._execute_gate_with_retry(
-                    gate,
-                    gate_context,
-                    fm,
-                    gate_name,
-                    progress,
-                )
-                duration = time.monotonic() - start
-                result["duration_s"] = duration
-                gate_results.append(result)
-
-                passed = result.get("passed", True)
-                if passed:
-                    sp_state["gates_completed"].append(gate_name)
-                    log.info(
-                        "sub_pipeline.gate.passed",
-                        gate_name=gate_name,
-                        sub_pipeline=sp_name,
-                        duration_s=duration,
-                    )
-                else:
-                    log.warning(
-                        "sub_pipeline.gate.failed",
-                        gate_name=gate_name,
-                        sub_pipeline=sp_name,
-                        failure_mode=fm,
-                        error=result.get("error", ""),
-                        duration_s=duration,
-                    )
-                    if fm == "stop":
-                        failed_gate = gate_name
-                        sp_state["status"] = "failed"
-                        sp_state["failed_gate"] = gate_name
-                        return {
-                            "passed": False,
-                            "gate_results": gate_results,
-                            "failed_gate": failed_gate,
-                        }
-                    # failure_mode == "retry": tenacity retry already handled
-                    # inside _execute_gate_with_retry; continue to next gate.
-
-            except _PERMANENT_EXCEPTIONS as exc:
-                duration = time.monotonic() - start
-                failed_gate = gate_name
-                tb = traceback.format_exc()
-                log.error(
-                    "sub_pipeline.gate.error.permanent",
-                    gate_name=gate_name,
-                    sub_pipeline=sp_name,
-                    duration_s=duration,
-                    error=str(exc),
-                    traceback=tb,
-                )
-                error_result = {
-                    "passed": False,
-                    "gate": gate_name,
-                    "error": str(exc),
-                    "duration_s": duration,
-                }
-                gate_results.append(error_result)
-                sp_state["status"] = "failed"
-                sp_state["failed_gate"] = gate_name
-                return {
-                    "passed": False,
-                    "gate_results": gate_results,
-                    "failed_gate": failed_gate,
-                }
-
-            except _TRANSIENT_EXCEPTIONS as exc:
-                duration = time.monotonic() - start
-                failed_gate = gate_name
-                log.error(
-                    "sub_pipeline.gate.error.transient",
-                    gate_name=gate_name,
-                    sub_pipeline=sp_name,
-                    duration_s=duration,
-                    error=str(exc),
-                    failure_mode=fm,
-                )
-                error_result = {
-                    "passed": False,
-                    "gate": gate_name,
-                    "error": str(exc),
-                    "duration_s": duration,
-                    "retry_count": self._max_retries,
-                    "retry_delay_s": self._retry_delay,
-                }
-                gate_results.append(error_result)
-                # Transient with fm="retry": budget exhausted, continue to
-                # next gate (matching _run() behaviour for transient errors).
-                if fm == "stop":
-                    sp_state["status"] = "failed"
-                    sp_state["failed_gate"] = gate_name
-                    return {
-                        "passed": False,
-                        "gate_results": gate_results,
-                        "failed_gate": failed_gate,
-                    }
-
-            except Exception as exc:
-                duration = time.monotonic() - start
-                failed_gate = gate_name
-                tb = traceback.format_exc()
-                log.error(
-                    "sub_pipeline.gate.error.unknown",
-                    gate_name=gate_name,
-                    sub_pipeline=sp_name,
-                    duration_s=duration,
-                    error=str(exc),
-                    traceback=tb,
-                )
-                error_result = {
-                    "passed": False,
-                    "gate": gate_name,
-                    "error": str(exc),
-                    "duration_s": duration,
-                }
-                gate_results.append(error_result)
-                sp_state["status"] = "failed"
-                sp_state["failed_gate"] = gate_name
-                return {
-                    "passed": False,
-                    "gate_results": gate_results,
-                    "failed_gate": failed_gate,
-                }
-
-        sp_state["status"] = "completed"
-        sp_state.pop("current_gate", None)
-        return {
-            "passed": True,
-            "gate_results": gate_results,
-            "failed_gate": None,
-        }
-
-    # ------------------------------------------------------------------
-    # Approval pause / resume (director mode)
-    # ------------------------------------------------------------------
 
     def resume(
         self,

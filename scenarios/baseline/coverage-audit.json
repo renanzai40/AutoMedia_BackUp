@@ -31,7 +31,7 @@
   "boundary_only_modes": [],
   "by_level": {
     "distribution": {
-      "L0": 111,
+      "L0": 113,
       "L1": 23,
       "L2": 8,
       "L3": 3,
@@ -112,7 +112,7 @@
         "L5": 0
       },
       "regression": {
-        "L0": 6,
+        "L0": 8,
         "L1": 0,
         "L2": 0,
         "L3": 0,
@@ -136,7 +136,7 @@
         "L5": 0
       }
     },
-    "total": 147
+    "total": 149
   },
   "covered": {
     "cli": [],
@@ -429,7 +429,70 @@
   ],
   "evidence_confidence": null,
   "evidence_run": null,
-  "generated_at": "2026-10-17T05:47:13.285432+00:00",
+  "generated_at": "2026-10-22T05:48:42.371792+00:00",
+  "input_missing_keys": {
+    "V0": [
+      "lint_result"
+    ],
+    "V1": [
+      "entries"
+    ],
+    "V3": [
+      "source_keywords",
+      "content_keywords",
+      "source_texts"
+    ],
+    "V4": [
+      "voice_id",
+      "segments"
+    ],
+    "V6": [
+      "avg_brightness",
+      "contrast",
+      "opacity",
+      "pixel_valid"
+    ]
+  },
+  "input_reachability_note": "3 of the 8 gates that DECLARE required inputs have them produced by this pipeline; 25 gates declare no required inputs (reachability not asserted). 5 will always report skipped because no module produces a required key: V0(lint_result), V1(entries), V3(source_keywords,content_keywords,source_texts), V4(voice_id,segments), V6(avg_brightness,contrast,opacity,pixel_valid).",
+  "input_reachable_gates": [
+    "V2",
+    "V5",
+    "V7"
+  ],
+  "input_unknown_gates": [
+    "CW",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "G0",
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "G5",
+    "G6",
+    "H0",
+    "L1",
+    "L2",
+    "L3",
+    "L4",
+    "P1",
+    "P2",
+    "P3",
+    "P4",
+    "pre-gate"
+  ],
+  "input_unreachable_gates": [
+    "V0",
+    "V1",
+    "V3",
+    "V4",
+    "V6"
+  ],
   "meta_scenario_count": 32,
   "meta_scenarios": [
     "account-cli-surface",
@@ -492,7 +555,7 @@
   "phantom_mcp": [],
   "phantom_modes": [],
   "phantom_note": "Phantom = used minus declared, computed purely (no KNOWN_FUTURE_SURFACE allowlist \u2014 phantom must stay visible or real drift is silently absorbed). Expected-phantom today: the committed meta scenarios reference the W4 validation surface before it ships (MCP: (none); CLI: (none)). When W4-T1/W4-T2 register those surfaces, the same audit flips them to covered and phantom \u2192 \u2205.",
-  "scenario_count": 147,
+  "scenario_count": 149,
   "summary": {
     "cli_boundary_only": 0,
     "cli_covered": 19,
@@ -503,6 +566,9 @@
     "gates_boundary_only": 0,
     "gates_covered": 27,
     "gates_declared": 33,
+    "gates_input_reachable": 3,
+    "gates_input_unknown": 25,
+    "gates_input_unreachable": 5,
     "gates_missing": 4,
     "gates_phantom": 0,
     "gates_unreachable": 2,
@@ -524,7 +590,7 @@
   },
   "surface_by_level": {
     "distribution": {
-      "L0": 79,
+      "L0": 81,
       "L1": 23,
       "L2": 8,
       "L3": 3,
@@ -596,6 +662,14 @@
         "L4": 0,
         "L5": 0
       },
+      "regression": {
+        "L0": 2,
+        "L1": 0,
+        "L2": 0,
+        "L3": 0,
+        "L4": 0,
+        "L5": 0
+      },
       "security": {
         "L0": 3,
         "L1": 0,
@@ -613,9 +687,9 @@
         "L5": 0
       }
     },
-    "total": 115
+    "total": 117
   },
-  "surface_scenario_count": 115,
+  "surface_scenario_count": 117,
   "surface_scenarios": [
     "account-list-cli-behavior",
     "add-brand-isolated",
@@ -704,6 +778,8 @@
     "redteam-path-traversal-refused",
     "redteam-prompt-injection-topic",
     "register-platform-adapter-stub",
+    "regression-263-slug-long-topic-filename",
+    "regression-adr007-gate-verdict-aggregate",
     "reject-gate-boundary",
     "reject-gate-positive",
     "remove-cron-schedule-cycle",

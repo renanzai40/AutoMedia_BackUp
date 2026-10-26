@@ -19,7 +19,10 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from structlog import get_logger
 
 from automedia.core.env_overlay import env_lookup
+from automedia.core.layout import AUDIO, DRAFTS, VIDEO
 from automedia.core.overrides import OverridesLoader
+from automedia.core.platforms import platform_categories
+from automedia.pipelines import gate_plan
 from automedia.pipelines.review_prompt import start_interactive_review_prompt
 
 if TYPE_CHECKING:
@@ -38,138 +41,27 @@ log = get_logger(__name__)
 # Gate name lists per mode
 # ---------------------------------------------------------------------------
 
-_AUTO_GATE_NAMES: list[str] = [
-    "pre-gate",
-    "CW",
-    "G0",
-    "G1",
-    "G2",
-    "G3",
-    "G6",
-    "V0",
-    "V1",
-    "V2",
-    "V3",
-    "V4",
-    "V5",
-    "V6",
-    "V7",
-    "H0",
-]
+# The per-mode gate plan lives in ``pipelines.gate_plan`` — the single
+# authority for gate order (issue #282).  The names above are imported from
+# there and re-exported unchanged, so the historical private imports (tests,
+# the CLI, coverage's static scan) keep working while the declaration exists
+# in exactly one place.  A test asserts each name IS the gate_plan list
+# object, so a local redefinition cannot silently fork the plan again.
+_AUTO_GATE_NAMES: list[str] = gate_plan._AUTO_GATE_NAMES
+_TEXT_ONLY_GATE_NAMES: list[str] = gate_plan._TEXT_ONLY_GATE_NAMES
+_TEXT_WITH_COVER_GATE_NAMES: list[str] = gate_plan._TEXT_WITH_COVER_GATE_NAMES
+_VIDEO_ONLY_GATE_NAMES: list[str] = gate_plan._VIDEO_ONLY_GATE_NAMES
+_QA_ONLY_GATE_NAMES: list[str] = gate_plan._QA_ONLY_GATE_NAMES
+_IMAGE_CAROUSEL_GATE_NAMES: list[str] = gate_plan._IMAGE_CAROUSEL_GATE_NAMES
+_SOCIAL_THREAD_GATE_NAMES: list[str] = gate_plan._SOCIAL_THREAD_GATE_NAMES
+_SHORT_VIDEO_GATE_NAMES: list[str] = gate_plan._SHORT_VIDEO_GATE_NAMES
+_REPURPOSE_GATE_NAMES: list[str] = gate_plan._REPURPOSE_GATE_NAMES
 
-_TEXT_ONLY_GATE_NAMES: list[str] = [
-    "CW",
-    "G0",
-    "G1",
-    "G2",
-    "G3",
-    "G6",
-    "H0",
-]
+_MODE_MAP: dict[str, list[str]] = gate_plan.MODE_GATE_NAMES
 
-_VIDEO_ONLY_GATE_NAMES: list[str] = [
-    "V0",
-    "V1",
-    "V2",
-    "V3",
-    "V4",
-    "V5",
-    "V6",
-    "V7",
-]
-
-_QA_ONLY_GATE_NAMES: list[str] = [
-    "G0",
-    "G2",
-    "G3",
-    "V1",
-    "V6",
-]
-
-_IMAGE_CAROUSEL_GATE_NAMES: list[str] = [
-    "CW",
-    "G0",
-    "G1",
-    "G2",
-    "G3",
-    "G6",
-]
-
-_TEXT_WITH_COVER_GATE_NAMES: list[str] = [
-    "CW",
-    "G0",
-    "G1",
-    "G2",
-    "G3",
-    "G6",
-    "H0",
-]
-
-_SOCIAL_THREAD_GATE_NAMES: list[str] = [
-    "CW",
-    "G0",
-    "G1",
-    "G2",
-    "G3",
-    "G6",
-]
-
-_SHORT_VIDEO_GATE_NAMES: list[str] = [
-    "pre-gate",
-    "CW",
-    "G0",
-    "G1",
-    "G2",
-    "G3",
-    "G6",
-    "V0",
-    "V1",
-    "V2",
-    "V3",
-    "V4",
-    "V5",
-    "V6",
-    "V7",
-    "H0",
-]
-
-_REPURPOSE_GATE_NAMES: list[str] = [
-    "pre-gate",
-    "CW",
-    "G0",
-    "G1",
-    "G2",
-    "G3",
-    "G6",
-    "V0",
-    "V1",
-    "V2",
-    "V3",
-    "V4",
-    "V5",
-    "V6",
-    "V7",
-    "H0",
-    "P1",
-    "P2",
-    "P3",
-    "P4",
-]
-
-_MODE_MAP: dict[str, list[str]] = {
-    "auto": _AUTO_GATE_NAMES,
-    "text_only": _TEXT_ONLY_GATE_NAMES,
-    "text_with_cover": _TEXT_WITH_COVER_GATE_NAMES,
-    "video_only": _VIDEO_ONLY_GATE_NAMES,
-    "qa_only": _QA_ONLY_GATE_NAMES,
-    "image-carousel": _IMAGE_CAROUSEL_GATE_NAMES,
-    "social-thread": _SOCIAL_THREAD_GATE_NAMES,
-    "short-video": _SHORT_VIDEO_GATE_NAMES,
-    "repurpose": _REPURPOSE_GATE_NAMES,
-}
-
-# Lifecycle gates — these are required and cannot be excluded via modifiers
-_LIFECYCLE_GATE_NAMES: list[str] = ["L1", "L2", "L3", "L4"]
+# Lifecycle gates — required where they apply and never removable via a gate
+# modifier.  Declared in ``gate_plan`` (see the plan block above).
+_LIFECYCLE_GATE_NAMES: list[str] = gate_plan.LIFECYCLE_GATE_NAMES
 
 #: Modes that owe a video artifact — the modes whose pipeline runs the
 #: video-production stage in ``_finalize_pipeline`` and are therefore
@@ -183,31 +75,12 @@ _VIDEO_PRODUCING_MODES: tuple[str, ...] = ("video_only", "short-video")
 # Valid modes tuple — shared reference for CLI/MCP/SDK validation
 VALID_MODES: tuple[str, ...] = tuple(_MODE_MAP)
 
-# Platform → content-category mapping for auto-deriving pipeline mode.
-# Used by _derive_mode_from_platforms() when mode is not explicitly set.
-_PLATFORM_CATEGORIES: dict[str, str] = {
-    "wechat": "text-first",
-    "zhihu": "text-first",
-    "xiaohongshu": "mixed-social",
-    "feishu": "notification-only",
-    "youtube": "video-first",
-    "twitter": "text-first",
-    "bilibili": "video-first",
-    "tiktok": "video-first",
-    "linkedin": "text-first",
-    "medium": "text-first",
-    "newsletter": "text-first",
-    "douyin": "video-first",
-    "wordpress": "text-first",
-    "reddit": "text-first",
-    "baijiahao": "text-first",
-    "juejin": "text-first",
-    "toutiao": "text-first",
-    "facebook": "mixed-social",
-    "instagram": "mixed-social",
-    "weibo": "text-first",
-    "kuaishou": "video-first",
-}
+# Platform -> content-category mapping for auto-deriving pipeline mode.
+# DERIVED from automedia.core.platforms (the single source of truth) rather
+# than maintained here: the local copy had 21 entries while the media-spec
+# table had 19 and the adapter registry 20, and nothing recorded why (issue
+# #283). See that module for what each count means.
+_PLATFORM_CATEGORIES: dict[str, str] = platform_categories()
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +182,7 @@ def _verify_resume_integrity(
     the resume point.  Mismatches are logged as warnings — the pipeline
     will regenerate those outputs anyway.
     """
-    from automedia.hooks.md5_tracker import get_pipeline_md5, verify_md5
+    from automedia.core.md5_tracker import get_pipeline_md5, verify_md5
 
     try:
         resume_idx = gate_names_in_mode.index(resume_from)
@@ -427,7 +300,7 @@ def _record_gate_md5s(
     gate_results: list[dict[str, Any]],
 ) -> None:
     """Record MD5 for each gate result that includes ``output_path``."""
-    from automedia.hooks.md5_tracker import record_md5
+    from automedia.core.md5_tracker import record_md5
 
     for result in gate_results:
         output_path = result.get("output_path")
@@ -688,73 +561,6 @@ def _collect_platform_gate_modifiers(
         return result
 
     return None  # Unknown type — no modifiers.
-
-
-def _filter_gates_for_platform(
-    gate_names: list[str],
-    platforms: list[str],
-    brand_profile: BrandProfile | None = None,
-) -> list[str]:
-    """Filter *gate_names* based on per-platform gate requirements.
-
-    Union semantics for includes — a gate is kept if *any* platform
-    needs it.  Intersection for excludes — a gate is removed only if
-    *all* platforms exclude it.
-
-    Like :func:`_collect_platform_gate_modifiers`, this is a forward-
-    compatible hook.  With the current ``BrandProfile.platforms`` schema
-    (``list[str]``) it is a no-op that returns a copy of *gate_names*.
-
-    Parameters
-    ----------
-    gate_names:
-        The current list of gate names.
-    platforms:
-        List of target platform names.
-    brand_profile:
-        Optional brand profile for per-platform gate config lookup.
-
-    Returns
-    -------
-    list[str]
-        Filtered gate name list.
-    """
-    if not platforms or brand_profile is None:
-        return list(gate_names)
-
-    brand_dict = asdict(brand_profile)
-    platforms_value = brand_dict.get("platforms", [])
-
-    # Current schema — no per-platform gate config → pass-through.
-    if not isinstance(platforms_value, dict):
-        return list(gate_names)
-
-    # Future richer format: collect per-platform includes/excludes.
-    all_includes: set[str] = set()
-    all_excludes: set[str] = set()
-
-    for platform in platforms:
-        p_config = platforms_value.get(platform, {})
-        if not isinstance(p_config, dict):
-            continue
-        gates_cfg = p_config.get("gates", {})
-        if not isinstance(gates_cfg, dict):
-            continue
-
-        inc = gates_cfg.get("include", [])
-        if isinstance(inc, list):
-            all_includes.update(inc)
-
-        exc = gates_cfg.get("exclude", [])
-        if isinstance(exc, list):
-            all_excludes.update(exc)
-
-    # Union for includes, intersection for excludes.
-    gate_set = set(gate_names) | all_includes
-    if all_excludes:
-        gate_set -= all_excludes
-
-    return [g for g in gate_names if g in gate_set]
 
 
 # ---------------------------------------------------------------------------
@@ -1048,7 +854,7 @@ def _run_pipeline(
         if resume_project_id is None and resume_from is None:
             clear_stale_hitl_state(project.project_dir)
 
-        brand_profile, mode, workflow_obj = _resolve_brand_and_workflow(
+        brand_profile, mode, workflow_obj, workflow_prompts = _resolve_brand_and_workflow(
             mode,
             brand,
             project,
@@ -1087,6 +893,8 @@ def _run_pipeline(
             skip_review,
             hitl_timeout_s,
             hitl_on_timeout,
+            resume_from,
+            workflow_prompts,
         )
 
         if block_on_hitl is None:
@@ -1115,6 +923,7 @@ def _run_pipeline(
             gate_context,
             progress,
             block_on_hitl,
+            config,
         )
 
         # Does THIS RUN owe a video, as opposed to merely attempting one?  The
@@ -1156,7 +965,7 @@ def _resolve_brand_and_workflow(
     brand: str,
     project: Project,
     workflow: str | None,
-) -> tuple[BrandProfile | None, str, Workflow | None]:
+) -> tuple[BrandProfile | None, str, Workflow | None, dict[str, str] | None]:
     from automedia.core.workflow import WorkflowLoader
     from automedia.manifests.brand_profile_schema import (
         BrandProfile,
@@ -1204,9 +1013,11 @@ def _resolve_brand_and_workflow(
                 hint="Pipeline will continue without workflow overrides.",
             )
 
+    workflow_prompts: dict[str, str] | None = None
     if workflow_obj is not None and brand_profile is not None:
         brand_dict = _merge_workflow_config(workflow_obj, asdict(brand_profile))
-        # Pop extra keys that BrandProfile doesn't accept before reconstructing
+        # Keep workflow-level overrides that BrandProfile doesn't accept;
+        # they are consumed directly from workflow_obj downstream.
         brand_dict.pop("workflow_gates", None)
         brand_dict.pop("workflow_prompts", None)
         try:
@@ -1219,6 +1030,8 @@ def _resolve_brand_and_workflow(
                 hint="Workflow merge produced invalid brand profile. "
                 "Falling back to original brand config.",
             )
+        if workflow_obj.prompts is not None:
+            workflow_prompts = dict(workflow_obj.prompts)
         mode = workflow_obj.mode
         log.info(
             "pipeline.workflow.mode_override",
@@ -1226,7 +1039,7 @@ def _resolve_brand_and_workflow(
             mode=mode,
         )
 
-    return brand_profile, mode, workflow_obj
+    return brand_profile, mode, workflow_obj, workflow_prompts
 
 
 def _select_gates(
@@ -1341,6 +1154,20 @@ def clear_stale_hitl_state(project_dir: str) -> None:
         log.warning("pipeline.hitl_state_clear_failed", path=str(state_file))
 
 
+def _latest_draft(project_dir: str | Path) -> Path | None:
+    """Return the newest ``01_content/drafts/*.md`` file, if any."""
+    drafts = Path(project_dir) / DRAFTS
+    if not drafts.is_dir():
+        return None
+    candidates = [path for path in drafts.glob("*.md") if path.is_file()]
+    if not candidates:
+        return None
+    try:
+        return max(candidates, key=lambda path: (path.stat().st_mtime_ns, path.name))
+    except OSError:
+        return None
+
+
 def _build_pipeline_context(
     topic: str,
     brand: str,
@@ -1359,6 +1186,8 @@ def _build_pipeline_context(
     skip_review: bool = False,
     hitl_timeout_s: float | None = None,
     hitl_on_timeout: str | None = None,
+    resume_from: str | None = None,
+    workflow_prompts: dict[str, str] | None = None,
 ) -> GateContext:
     from automedia.engines import resolve_engine
     from automedia.engines.errors import (
@@ -1444,6 +1273,10 @@ def _build_pipeline_context(
     gate_context["hitl_preset"] = "director" if director else "automated"
     gate_context["skip_review"] = skip_review
 
+    if workflow_prompts is not None:
+        gate_context["workflow_prompts"] = workflow_prompts
+        log.info("pipeline.workflow_prompts_applied", templates=sorted(workflow_prompts))
+
     hyperframes_available = _check_hyperframes(mode=mode)
     video_engine_available = False
     try:
@@ -1492,10 +1325,37 @@ def _build_pipeline_context(
             )
 
     if "CW" not in gate_names and not gate_context.get("content", "").strip():
-        placeholder = f"[content skipped in {mode} mode]"
-        gate_context["content"] = placeholder
-        gate_context["draft"] = placeholder
-        log.info("pipeline.content_placeholder", mode=mode, placeholder=placeholder)
+        draft_path = _latest_draft(project.project_dir)
+        draft_text = ""
+        if draft_path is not None:
+            try:
+                draft_text = draft_path.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                log.warning(
+                    "pipeline.resume.draft_unreadable",
+                    path=str(draft_path),
+                    error=str(exc),
+                )
+        if draft_text:
+            gate_context["content"] = draft_text
+            gate_context["draft"] = draft_text
+            log.info(
+                "pipeline.resume.draft_rehydrated",
+                path=str(draft_path),
+                chars=len(draft_text),
+            )
+        else:
+            placeholder = f"[content skipped in {mode} mode]"
+            gate_context["content"] = placeholder
+            gate_context["draft"] = placeholder
+            if resume_from is not None:
+                log.warning(
+                    "pipeline.resume.draft_missing",
+                    project_dir=project.project_dir,
+                    mode=mode,
+                    resume_from=resume_from,
+                )
+            log.info("pipeline.content_placeholder", mode=mode, placeholder=placeholder)
 
     if mode == "social-thread":
         gate_context["content_format"] = "social_thread"
@@ -1507,6 +1367,39 @@ def _build_pipeline_context(
     return gate_context
 
 
+_ENGINE_RETRY_DEFAULTS: dict[str, int | float] = {
+    "max_retries": 3,
+    "retry_delay": 1.0,
+    "max_quality_retries": 3,
+    "max_regenerations": 2,
+}
+
+
+def _engine_retry_settings(config: dict[str, Any] | None) -> dict[str, int | float]:
+    """Read and validate the ``gate_engine`` retry knobs from *config*."""
+    raw = config.get("gate_engine") if isinstance(config, dict) else None
+    configured = raw if isinstance(raw, dict) else {}
+
+    def _read(key: str, minimum: int | float, coerce: type[int] | type[float]) -> int | float:
+        value = configured.get(key, _ENGINE_RETRY_DEFAULTS[key])
+        try:
+            parsed = coerce(value)
+        except (TypeError, ValueError):
+            log.warning("pipeline.gate_engine.invalid_setting", key=key, value=value)
+            parsed = coerce(_ENGINE_RETRY_DEFAULTS[key])
+        if parsed < minimum:
+            log.warning("pipeline.gate_engine.out_of_range_setting", key=key, value=value)
+            parsed = coerce(_ENGINE_RETRY_DEFAULTS[key])
+        return parsed
+
+    return {
+        "max_retries": _read("max_retries", 1, int),
+        "retry_delay": _read("retry_delay", 0.0, float),
+        "max_quality_retries": _read("max_quality_retries", 0, int),
+        "max_regenerations": _read("max_regenerations", 0, int),
+    }
+
+
 def _setup_and_run_engine(
     gates: list[BaseGate],
     hooks: list[GateHook] | None,
@@ -1515,6 +1408,7 @@ def _setup_and_run_engine(
     gate_context: GateContext | dict[str, Any],
     progress: PipelineProgress | None,
     wait_for_hitl: bool,
+    engine_config: dict[str, Any] | None = None,
 ) -> tuple[bool, list[dict[str, Any]], bool]:
     from automedia.hooks.cost_tracker import CostTracker
     from automedia.hooks.pipeline_history import PipelineHistoryHook
@@ -1524,9 +1418,14 @@ def _setup_and_run_engine(
     all_hooks.append(CostTracker(project.project_dir))
     all_hooks.append(PipelineHistoryHook())
 
+    retry = _engine_retry_settings(engine_config)
     engine = GateEngine(
         gates,
         hooks=all_hooks,
+        max_retries=int(retry["max_retries"]),
+        retry_delay=float(retry["retry_delay"]),
+        max_quality_retries=int(retry["max_quality_retries"]),
+        max_regenerations=int(retry["max_regenerations"]),
         pause_on_approval=director,
         # Fires once, right before the first V gate: V0–V7 inspect media
         # artifacts this pipeline must produce first (P0-1 wiring).
@@ -1907,6 +1806,10 @@ def _build_gates_log(results: list[dict[str, Any]]) -> list[GateLogEntry]:
                 status=status,
                 duration_s=r.get("duration_s", 0.0),
                 error=r.get("error"),
+                # The gate's own explanation of a skip, preserved verbatim
+                # (issue #285).  A skip without a reason is a report that
+                # cannot distinguish "no input" from "absent tooling".
+                skip_reason=(r.get("reason") or r.get("detail")) if status == "skipped" else None,
             )
         )
     return entries
@@ -1921,8 +1824,7 @@ def _write_run_gate_report(
 
     Rendered LIVE (``gate_results`` passed) so rows carry per-check detail
     and H0 ``_hitl_approved`` semantics.  Write errors are logged and
-    silently skipped — a report-write failure must never fail the pipeline
-    (same discipline as the MetricsHook write).
+    silently skipped — a report-write failure must never fail the pipeline.
     """
     from automedia.pipelines.gate_report import render_gate_report, write_gate_report
 
@@ -2067,6 +1969,13 @@ def _produce_cover_image(gate_context: GateContext | dict[str, Any]) -> None:
         )
 
 
+def _expected_md5_records(paths: list[str]) -> dict[str, dict[str, str]]:
+    """Record only the expected digest; V7 computes the actual one at check time."""
+    from automedia.core.md5_tracker import compute_md5
+
+    return {path: {"expected": compute_md5(path)} for path in paths}
+
+
 def _produce_video_track(gate_context: GateContext | dict[str, Any]) -> None:
     """音频轨 → 图片 → 视频 → 产物清单，供 V 门真实校验。
 
@@ -2106,7 +2015,7 @@ def _produce_video_track(gate_context: GateContext | dict[str, Any]) -> None:
     from automedia.pipelines.audio_pipeline import AudioPipeline
 
     audio = AudioPipeline(config=gate_context.get("config"))
-    audio_dir = os.path.join(project_dir, "04_audio")
+    audio_dir = os.path.join(project_dir, AUDIO)
     audio_path = audio.generate_tts(text, output_path=os.path.join(audio_dir, "narration.mp3"))
     transcription = audio.transcribe_audio(audio_path)
     transcript_text = str(transcription.get("text", "") or "").strip()
@@ -2158,9 +2067,7 @@ def _produce_video_track(gate_context: GateContext | dict[str, Any]) -> None:
             video_engine = cast(
                 BaseVideoEngine, resolve_engine("video", gate_context.get("config"))
             )
-            video_path = video_engine.render(
-                assets, os.path.join(project_dir, "03_video", "output.mp4")
-            )
+            video_path = video_engine.render(assets, os.path.join(project_dir, VIDEO, "output.mp4"))
             gate_context["video_path"] = video_path
             produced.append(video_path)
             log.info("pipeline.video_produced", path=video_path)
@@ -2169,16 +2076,12 @@ def _produce_video_track(gate_context: GateContext | dict[str, Any]) -> None:
         except Exception as exc:
             log.warning("pipeline.video_production_unexpected_error", error=str(exc))
 
-    # 产物段：V7 的输入——如实登记本次真实产出的文件（清单、尺寸、md5 自洽记录）。
-    from automedia.hooks.md5_tracker import _compute_md5
-
+    # 产物段：V7 的输入——登记清单、尺寸和生成时的 expected md5；
+    # actual 由 V7 校验时从磁盘重新计算，不能用同一次计算自证。
     required_files = [path for path in produced if path and os.path.isfile(path)]
     gate_context["required_files"] = required_files
     gate_context["file_sizes"] = {path: os.path.getsize(path) for path in required_files}
-    gate_context["md5_records"] = {
-        path: {"expected": _compute_md5(path), "actual": _compute_md5(path)}
-        for path in required_files
-    }
+    gate_context["md5_records"] = _expected_md5_records(required_files)
     log.info("pipeline.media_stage.artifacts_recorded", count=len(required_files))
 
 

@@ -270,10 +270,10 @@ class TestGateEngineRun:
         assert len(results) == 1  # second gate never ran
 
     def test_rewrite_does_not_stop(self) -> None:
-        """A failing rewrite gate does NOT halt the pipeline."""
+        """A failing retry gate does not halt the pipeline, but is not success."""
         engine = GateEngine([_FailRewriteGate(), _PassGate()])
         ok, results = engine.run({})
-        assert ok is True  # pipeline completed with stop gate passing
+        assert ok is False  # the gate never passed, so the run is not a success
         assert len(results) == 2  # second gate DID run
 
     def test_exception_in_stop_gate_stops(self) -> None:
@@ -286,10 +286,10 @@ class TestGateEngineRun:
         assert "gate crashed" in results[0]["error"]
 
     def test_exception_in_rewrite_gate_continues(self) -> None:
-        """A transient exception in a rewrite gate does NOT halt the pipeline."""
+        """A transient exception in a retry gate continues, but is not success."""
         engine = GateEngine([_ErrorRewriteGate(), _PassGate()])
         ok, results = engine.run({})
-        assert ok is True  # pipeline completed with stop gate passing
+        assert ok is False  # the gate never passed, so the run is not a success
         assert len(results) == 2
 
     def test_gate_context_gets_gate_name(self) -> None:
@@ -389,6 +389,44 @@ class TestHookDispatch:
         assert len(hook.failed_calls) == 0
         # But before_gate was called
         assert len(hook.before_calls) == 1
+
+    def test_stop_failure_calls_after_gate(self) -> None:
+        """A result-level stop failure dispatches after_gate, like retry exhaustion."""
+        hook = _RecordingHook()
+        engine = GateEngine([_FailStopGate()], hooks=[hook])
+        engine.run({})
+        assert len(hook.after_calls) == 1
+        assert hook.after_calls[0][2]["passed"] is False
+        assert len(hook.failed_calls) == 0
+
+    def test_hook_exception_does_not_abort_pipeline(self) -> None:
+        class _BoomHook(GateObserver):
+            def before_gate(self, gate_name: str, context: dict[str, Any]) -> None:
+                raise RuntimeError("boom")
+
+        recorder = _RecordingHook()
+        engine = GateEngine([_PassGate()], hooks=[_BoomHook(), recorder])
+        success, results = engine.run({})
+        assert success is True
+        assert results[0]["passed"] is True
+        assert recorder.before_calls
+
+    def test_to_dict_detaches_mutable_fields(self) -> None:
+        ctx = GateContext(
+            config={"nested": {"n": 1}},
+            output_files=[{"path": "a"}],
+            body_images=["a.png"],
+        )
+        ctx.extra["nested"] = {"n": 1}
+        snapshot = ctx.to_dict()
+        snapshot["config"]["nested"]["n"] = 2
+        snapshot["output_files"][0]["path"] = "b"
+        snapshot["body_images"].append("b.png")
+        snapshot["nested"]["n"] = 2
+        assert ctx.config["nested"]["n"] == 1
+        assert ctx.output_files[0]["path"] == "a"
+        assert ctx.body_images == ["a.png"]
+        assert ctx.extra["nested"]["n"] == 1
 
     def test_rewrite_failure_calls_after_gate(self) -> None:
         """A failing rewrite gate still calls after_gate (not on_gate_failed)."""
@@ -570,7 +608,7 @@ class TestExceptionCategorization:
         engine = GateEngine([_TransientConnectionErrorGate(), trailing])
         ok, results = engine.run({})
 
-        assert ok is True  # pipeline completed with stop gate passing
+        assert ok is False  # the gate never passed, so the run is not a success
         assert len(results) == 2, "Transient error should not halt pipeline"
         assert results[0]["passed"] is False
         assert results[1]["passed"] is True
@@ -581,7 +619,7 @@ class TestExceptionCategorization:
         engine = GateEngine([_TransientTimeoutErrorGate(), trailing])
         ok, results = engine.run({})
 
-        assert ok is True  # pipeline completed with stop gate passing
+        assert ok is False  # the gate never passed, so the run is not a success
         assert len(results) == 2
         assert results[0]["passed"] is False
         assert results[1]["passed"] is True

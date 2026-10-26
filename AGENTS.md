@@ -5,7 +5,7 @@ First file an AI coding agent reads. This is the map; deep detail lives in
 
 ## 1. Project Overview
 - **Language:** Python 3.11+
-- **Size:** 67,750 LOC across 261 Python files (`src/automedia/` core) · 163,015 LOC across 589 Python files (repo, `.py` only, excluding `.venv`/`.git`) · 994 git-tracked files (as-of 2026-10-18; run find & wc -l)
+- **Size:** 68,000+ LOC across 260+ Python files (`src/automedia/` core) · 165,000+ LOC across 600+ Python files (repo, `.py` only, git-tracked) · 1,000+ git-tracked files (as-of 2026-10-24; `scripts/check-doc-consistency.py` derives and gates these)
 - **Key Dependencies:** typer (CLI), mcp (Python SDK), Pydantic 2.x, PyYAML, tenacity, Pillow
 - **License:** MIT
 - **Install:** `pip install -e ".[dev]"` (full capability) or `pip install -e ".[mcp]"` (MCP only). See README for prerequisites and all extras.
@@ -34,11 +34,11 @@ docs/ · scripts/ · tests/ · deploy/ · .github/workflows/
 - **Gate Engine:** ordered gates with `failure_mode`: `"stop"` halts the pipeline, `"rewrite"` retries. Preset order: pre-gate → CW → G0-G3 → G6 → V0-V7 → H0 (G4/G5 and L1-L4 stay registered but are in no preset; L1-L4 run via their lifecycle commands). Nine modes (`auto`, `text_only`, `text_with_cover`, `video_only`, `qa_only`, `image-carousel`, `social-thread`, `short-video`, `repurpose`) select gate subsets; D-gates (D1-D7) run standalone via CLI/MCP, P-gates (P1-P4) end repurpose. See `automedia/pipelines/runner.py`.
 - **6-Layer Configuration:** built-in `defaults.yaml` → project `.automedia/` → user `~/.automedia/` → override rules → override prompts → `AUTOMEDIA_*` env vars + explicit overrides. See `automedia/core/config_loader.py`.
 - **GateHook Observer Protocol:** readonly observers; never mutate or skip gates. Lifecycle: `before_gate()`, `after_gate()`, `on_gate_failed()`; each returns `None`. See `automedia/hooks/protocol.py`.
-- **MD5 Tracking:** gates write product checksums to `pipeline_md5.json` in the project dir. See `automedia/hooks/md5_tracker.py`.
+- **MD5 Tracking:** gates write product checksums to `pipeline_md5.json` in the project dir. See `automedia/core/md5_tracker.py`.
 - **External Scheduling:** no built-in scheduler; external crond calls `automedia cron run --due` (dispatches every schedule entry due now; `automedia cron run <job>` remains the explicit single-job path). See `automedia/cron/`.
 - **Three-Entry-Point Design:** CLI, MCP, and SDK all delegate to `run_full_pipeline()` (see §2); MCP also exposes Omni triad tools (extract, translate, convert).
 - **Gate Auto-Registration:** `BaseGate` subclasses auto-register in the global `GateRegistry` singleton via `__init_subclass__`.
-- **Canonical Gate DAG:** `pipelines/dag.py` (`AUTO_GATE_DAG`, 26 nodes) + `pipelines/state_view.py` are an additive, order-equivalent representation of `_MODE_MAP` — mode gate lists stay authoritative, and the DAG layer adds topological/downstream/state queries on top.
+- **Gate order — one authority:** `pipelines/gate_plan.py` (`MODE_GATE_NAMES`, 9 modes) declares the ordered gate list every mode executes. `pipelines/dag.py` (`AUTO_GATE_DAG`, 26 nodes) describes the dependency EDGES among the same gates and powers topological/downstream/state queries; a test pins the DAG's topological order to the plan for every mode. `runner._MODE_MAP` is that same plan object, re-exported.
 
 ## 5. Agent Constraints (Red Lines) — MUST OBEY
 
@@ -185,7 +185,7 @@ stdio transport. Start with `python -m automedia.mcp.server`. File ops gated by 
 ## 11. Validation Layer
 AutoMedia is agent-oriented, so agents are the testers and humans are the director. The single
 schema authority is `scenarios/STANDARDS.md`; `scenarios/README.md` is the onboarding guide.
-- Scenario library: count is authoritative from `automedia validate matrix` output (147 scenarios as-of 2026-10-18; do not hard-code a count elsewhere); `scenarios/baseline/` holds the committed pre-flight baseline.
+- Scenario library: count is authoritative from `automedia validate matrix` output (149 scenarios as-of 2026-10-22; do not hard-code a count elsewhere); `scenarios/baseline/` holds the committed pre-flight baseline.
 - CLI: `automedia validate list|run|report|diff|coverage|matrix|sign`
 - MCP: `list_validation_scenarios`, `run_validation_scenario`, `run_validation_suite`, `get_validation_report`, `validation_coverage_audit`, `validation_matrix`
 - The validation-driving surface is the CLI and MCP server only; the SDK is a product entry point, explicitly out of validation scope.

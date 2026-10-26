@@ -22,12 +22,20 @@ below.
 
 from __future__ import annotations
 
+import random
 import subprocess
 import sys
 
 import pytest
 
-from automedia.pipelines.dag import AUTO_GATE_DAG, GateNode, downstream, topological_order
+from automedia.pipelines import dag
+from automedia.pipelines.dag import (
+    AUTO_GATE_DAG,
+    GATE_ORDER,
+    GateNode,
+    downstream,
+    topological_order,
+)
 from automedia.pipelines.runner import _MODE_MAP
 
 # Canonical track assignment (per the graph-engineering-rollout spec).
@@ -40,8 +48,14 @@ _QA_TRACK = {"pre-gate", "H0", "P1", "P2", "P3", "P4"}
 class TestTopologicalOrderEquivalence:
     """P0 load-bearing invariant: the DAG reproduces the linear lists.
 
-    For every mode in ``_MODE_MAP``, topologically ordering the mode's gate
-    subset must yield the exact same list the runner uses today — byte-exact.
+    The old version of this test passed the mode's own list as input and
+    asserted the same list came back — true by construction, because the
+    implementation tie-broke on input order.  It proved nothing: a shuffled
+    input could legally emit G6 before CW, and only the sorted input ever
+    produced the sorted answer.
+
+    These tests pin the property that actually matters: the output depends on
+    the GRAPH, not on how the caller ordered its argument.
     """
 
     @pytest.mark.parametrize("mode", list(_MODE_MAP))
@@ -51,6 +65,193 @@ class TestTopologicalOrderEquivalence:
         ordered = topological_order(AUTO_GATE_DAG, expected)
         assert isinstance(ordered, list)
         assert ordered == expected
+
+    @pytest.mark.parametrize("mode", list(_MODE_MAP))
+    def test_shuffled_input_still_yields_the_canonical_order(self, mode: str) -> None:
+        """Any permutation of a mode's gates must sort back to the plan.
+
+        Without this, the equivalence above is an identity check on the input.
+        """
+        expected = _MODE_MAP[mode]
+        shuffler = random.Random(f"dag-{mode}")
+        for _ in range(50):
+            shuffled = list(expected)
+            shuffler.shuffle(shuffled)
+            assert topological_order(AUTO_GATE_DAG, shuffled) == expected
+
+    @pytest.mark.parametrize("mode", list(_MODE_MAP))
+    def test_output_is_a_valid_topological_order(self, mode: str) -> None:
+        """Vertices precede nothing that depends on them.
+
+        Checked on a SHUFFLED input so the assertion cannot pass just by
+        echoing the plan back.
+        """
+        subset = set(_MODE_MAP[mode])
+        shuffler = random.Random(f"valid-{mode}")
+        shuffled = list(_MODE_MAP[mode])
+        shuffler.shuffle(shuffled)
+        ordered = topological_order(AUTO_GATE_DAG, shuffled)
+
+        position = {gate: index for index, gate in enumerate(ordered)}
+        for gate in ordered:
+            for parent in AUTO_GATE_DAG[gate].depends_on:
+                if parent in subset:
+                    assert position[parent] < position[gate], f"{parent} must precede {gate}"
+
+    def test_g6_never_precedes_cw(self) -> None:
+        """REGRESSION LOCK for the bug the old tie-break hid.
+
+        G6 depends on G5, which is in no preset, so under present-parents
+        semantics G6 becomes "ready" immediately.  With an input-order
+        tie-break that let it emit first and inspect content CW had not yet
+        written.  Declaration-order tie-break keeps CW ahead of it.
+        """
+        for mode in ("text_with_cover", "image-carousel", "social-thread"):
+            gates = _MODE_MAP[mode]
+            shuffler = random.Random(f"g6-{mode}")
+            shuffled = list(gates)
+            shuffle_attempts = 20
+            for _ in range(shuffle_attempts):
+                shuffler.shuffle(shuffled)
+                ordered = topological_order(AUTO_GATE_DAG, shuffled)
+                assert ordered.index("CW") < ordered.index("G6"), mode
+
+
+class TestDeclarationOrderIsSemantic:
+    """``AUTO_GATE_DAG`` insertion order IS the tie-break, so it is pinned.
+
+    ``topological_order`` resolves ready gates in declaration order.  Without a
+    pin, reordering the dict would silently change which gate runs first — the
+    exact class of change that produced the G6-before-CW bug.  These tests make
+    the order data instead of an accident of source layout.
+    """
+
+    EXPECTED_ORDER: tuple[str, ...] = (
+        "pre-gate",
+        "CW",
+        "G0",
+        "G1",
+        "G2",
+        "G3",
+        "G4",
+        "G5",
+        "G6",
+        "V0",
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "V5",
+        "V6",
+        "V7",
+        "H0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "P1",
+        "P2",
+        "P3",
+        "P4",
+    )
+
+    def test_gate_order_matches_the_pinned_sequence(self) -> None:
+        """The literal sequence.  Editing the dict without editing this fails."""
+        assert GATE_ORDER == self.EXPECTED_ORDER
+
+    def test_gate_order_covers_the_dag_exactly(self) -> None:
+        assert set(GATE_ORDER) == set(AUTO_GATE_DAG)
+        assert len(GATE_ORDER) == len(AUTO_GATE_DAG)
+
+    def test_track_blocks_appear_in_the_documented_order(self) -> None:
+        """pre-gate → copy → video → H0 → lifecycle → repurpose."""
+        index = {name: i for i, name in enumerate(GATE_ORDER)}
+        blocks = [
+            ("pre-gate",),
+            ("CW", "G0", "G1", "G2", "G3", "G4", "G5", "G6"),
+            ("V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7"),
+            ("H0",),
+            ("L1", "L2", "L3", "L4"),
+            ("P1", "P2", "P3", "P4"),
+        ]
+        flattened = [gate for block in blocks for gate in block]
+        assert flattened == list(GATE_ORDER)
+        assert [index[g] for g in flattened] == sorted(index[g] for g in flattened)
+
+    def test_import_time_guard_accepts_the_real_dag(self) -> None:
+        """The guard runs at import; importing this module already proved it."""
+        dag._validate_declaration_order()  # must not raise
+
+    def test_import_time_guard_rejects_a_forward_edge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A dependent declared BEFORE its parent must be rejected.
+
+        Simulated by patching the order so CW (which depends on pre-gate) comes
+        first — the exact shape a careless reorder would produce.
+        """
+        # Move pre-gate to the END: same key set (so the drift guard passes),
+        # but CW now sits before the parent it depends on.
+        rotated = (*(name for name in GATE_ORDER if name != "pre-gate"), "pre-gate")
+        monkeypatch.setattr(dag, "GATE_ORDER", rotated)
+
+        with pytest.raises(RuntimeError, match="declared LATER"):
+            dag._validate_declaration_order()
+
+    def test_import_time_guard_rejects_drift(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(dag, "GATE_ORDER", GATE_ORDER[:-1])
+
+        with pytest.raises(RuntimeError, match="drifted"):
+            dag._validate_declaration_order()
+
+    def test_unknown_parent_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        broken = dict(AUTO_GATE_DAG)
+        broken["CW"] = GateNode(
+            name="CW", track="copy", depends_on=("does-not-exist",), failure_mode="stop"
+        )
+        monkeypatch.setattr(dag, "AUTO_GATE_DAG", broken)
+
+        with pytest.raises(RuntimeError, match="unknown gate"):
+            dag._validate_declaration_order()
+
+
+class TestEdgesMustBeSatisfiable:
+    """A DAG edge must name a predecessor that can actually run first.
+
+    Under present-parents semantics a parent outside the mode subset is
+    silently ignored, so an edge whose parent is in NO preset is not a soft
+    constraint — it is a claim that can never be honoured.  Two such edges
+    existed (G6<-G5 and P1<-L4) and both were invisible because the DAG was
+    only ever checked against inputs that happened to be pre-sorted.
+    """
+
+    def test_no_preset_gate_depends_on_a_gate_in_no_preset(self) -> None:
+        """The specific defect: a preset gate claiming an unpreset predecessor."""
+        preset_gates = set().union(*_MODE_MAP.values())
+        offenders = [
+            f"{gate} <- {parent}"
+            for gate, node in AUTO_GATE_DAG.items()
+            if gate in preset_gates
+            for parent in node.depends_on
+            if parent not in preset_gates
+        ]
+
+        assert offenders == [], (
+            "these edges name a predecessor that no preset ever runs: " + ", ".join(offenders)
+        )
+
+    def test_unpreset_gates_may_still_chain_among_themselves(self) -> None:
+        """G4/G5 and L1-L4 keep their order for the command paths that run them."""
+        for gate, parent in (("G5", "G4"), ("L2", "L1"), ("L3", "L2"), ("L4", "L3")):
+            assert AUTO_GATE_DAG[gate].depends_on == (parent,)
+
+    def test_every_edges_parent_also_appears_earlier_in_declaration_order(self) -> None:
+        """Declaration order is the tie-break, so an edge must respect it."""
+        order = list(AUTO_GATE_DAG)
+        position = {name: index for index, name in enumerate(order)}
+        for gate, node in AUTO_GATE_DAG.items():
+            for parent in node.depends_on:
+                assert position[parent] < position[gate], f"{parent} must be declared before {gate}"
 
 
 class TestDownstreamReverseTopologicalClosure:
@@ -119,9 +320,15 @@ class TestDownstreamReverseTopologicalClosure:
             "P4",
         ]
 
-    def test_downstream_l4_covers_repurpose_only(self) -> None:
-        """L4 is the last lifecycle gate; only the repurpose chain follows."""
-        assert downstream(AUTO_GATE_DAG, "L4") == ["P1", "P2", "P3", "P4"]
+    def test_downstream_l4_is_empty(self) -> None:
+        """L4 is the last lifecycle gate and nothing in a preset follows it.
+
+        P1 used to depend on L4, but L4 runs only from the standalone
+        ``localize`` command while P1 runs inside ``repurpose`` — so the edge
+        declared a gate that can never precede P1.  P1 now depends on H0, the
+        last gate both flows actually share.
+        """
+        assert downstream(AUTO_GATE_DAG, "L4") == []
 
     def test_downstream_g0_no_video_gates(self) -> None:
         """G0's subtree is copy→H0→lifecycle→repurpose; never video.
@@ -226,8 +433,16 @@ class TestDependsOnEdges:
     def test_cw_depends_on_pre_gate(self) -> None:
         assert AUTO_GATE_DAG["CW"].depends_on == ("pre-gate",)
 
-    def test_g6_depends_on_g5(self) -> None:
-        assert AUTO_GATE_DAG["G6"].depends_on == ("G5",)
+    def test_g6_depends_on_the_copy_track_not_on_unpreset_g5(self) -> None:
+        """G6 depends on G3, not G5.
+
+        G5 (html_hard) is in no preset, so "G6 depends on G5" declared an
+        ordering that can never happen: under present-parents semantics the
+        edge was silently dropped and G6 became ready immediately.  G3 is the
+        last copy gate every copy-bearing mode actually runs, so the edge now
+        encodes a real predecessor.
+        """
+        assert AUTO_GATE_DAG["G6"].depends_on == ("G3",)
 
     def test_v0_depends_on_cw_and_is_parallel(self) -> None:
         """V0 runs async-parallel off CW, independent of the copy track."""

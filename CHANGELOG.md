@@ -1,5 +1,104 @@
 # Changelog
 
+## [1.11.1](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.11.0...automedia-v1.11.1) (2026-10-24)
+
+
+### Dependencies
+
+* **deps:** bump filelock from 3.29.7 to 4.2.1 ([#307](https://github.com/1StepMore/AutoMedia/issues/307)) ([e6abaaa](https://github.com/1StepMore/AutoMedia/commit/e6abaaab0e3a844e82fae010c360b49b15943eca))
+
+## [1.11.0](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.10.5...automedia-v1.11.0) (2026-10-24)
+
+
+### Features
+
+* **gates:** report why a gate skipped and whether its inputs exist ([#315](https://github.com/1StepMore/AutoMedia/issues/315)) ([d58a956](https://github.com/1StepMore/AutoMedia/commit/d58a956db99d45c33164a056c1344562f8d11ecd)), closes [#285](https://github.com/1StepMore/AutoMedia/issues/285)
+
+## [1.10.5](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.10.4...automedia-v1.10.5) (2026-10-24)
+
+
+### Bug Fixes
+
+* **core:** give the project layout one source of truth ([#312](https://github.com/1StepMore/AutoMedia/issues/312)) ([26568da](https://github.com/1StepMore/AutoMedia/commit/26568da3d03635d8f38d6fa248c42c6d0b2c9af3)), closes [#284](https://github.com/1StepMore/AutoMedia/issues/284)
+
+## [1.10.4](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.10.3...automedia-v1.10.4) (2026-10-23)
+
+
+### Bug Fixes
+
+* **pipeline:** wire workflow prompt overrides through to load_prompt ([#298](https://github.com/1StepMore/AutoMedia/issues/298)) ([5f54ed7](https://github.com/1StepMore/AutoMedia/commit/5f54ed7a567449a94be9f82771a1c2da886d8424)), closes [#281](https://github.com/1StepMore/AutoMedia/issues/281)
+
+
+### Dependencies
+
+* **deps:** bump virtualenv from 21.14.9 to 21.14.13 ([#302](https://github.com/1StepMore/AutoMedia/issues/302)) ([a047976](https://github.com/1StepMore/AutoMedia/commit/a0479768fb979f514795f799a26abe42660c85d4))
+
+
+### Documentation
+
+* gate the size claims the [#280](https://github.com/1StepMore/AutoMedia/issues/280) fix left ungated ([#308](https://github.com/1StepMore/AutoMedia/issues/308)) ([194b338](https://github.com/1StepMore/AutoMedia/commit/194b338f5b0ef5d7080edbd3e779c3f4e471b00c))
+
+## [1.10.3](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.10.2...automedia-v1.10.3) (2026-10-23)
+
+
+### Dependencies
+
+* **deps:** bump opentelemetry-api from 1.43.0 to 1.45.1 ([#292](https://github.com/1StepMore/AutoMedia/issues/292)) ([d7427e9](https://github.com/1StepMore/AutoMedia/commit/d7427e9ffa3ff7a90390d09737951340c14cb7f0))
+* **deps:** bump virtualenv from 21.7.13 to 21.14.9 ([#293](https://github.com/1StepMore/AutoMedia/issues/293)) ([2fe9401](https://github.com/1StepMore/AutoMedia/commit/2fe940151a63e7753e2510c8810ad7f379be2119))
+
+## [1.10.2](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.10.1...automedia-v1.10.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **hooks:** enforce the GateHook readonly contract ([#294](https://github.com/1StepMore/AutoMedia/issues/294)) ([f458598](https://github.com/1StepMore/AutoMedia/commit/f4585988da6b25be4b7a5542486f540b0071b31d)), closes [#278](https://github.com/1StepMore/AutoMedia/issues/278)
+
+
+### Documentation
+
+* **mkdocs:** add ADR-006 and ADR-007 to the nav ([#289](https://github.com/1StepMore/AutoMedia/issues/289)) ([7793719](https://github.com/1StepMore/AutoMedia/commit/7793719ee8016c089fa62a4145616354e77db3e0)), closes [#276](https://github.com/1StepMore/AutoMedia/issues/276)
+* refresh size claims and gate them against the tree ([#296](https://github.com/1StepMore/AutoMedia/issues/296)) ([9ef545e](https://github.com/1StepMore/AutoMedia/commit/9ef545ea30fe255b33c6cf67e6b832fb5ef9c335)), closes [#280](https://github.com/1StepMore/AutoMedia/issues/280)
+
+## [1.10.1](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.10.0...automedia-v1.10.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **gates:** make V7 MD5 verification recompute the actual digest ([#274](https://github.com/1StepMore/AutoMedia/issues/274)) ([4f40432](https://github.com/1StepMore/AutoMedia/commit/4f4043280a83ae137deb600fa7d1c6c41727bb53)), closes [#270](https://github.com/1StepMore/AutoMedia/issues/270)
+* **pipeline:** rehydrate the draft when resuming past CW ([#273](https://github.com/1StepMore/AutoMedia/issues/273)) ([35f39e5](https://github.com/1StepMore/AutoMedia/commit/35f39e533984b527bee06896456ff11e42fb9086)), closes [#269](https://github.com/1StepMore/AutoMedia/issues/269)
+* **pipeline:** wire gate_engine retry config into GateEngine ([#272](https://github.com/1StepMore/AutoMedia/issues/272)) ([842fca4](https://github.com/1StepMore/AutoMedia/commit/842fca4f30d5ec465b910cc285dc12872bc6a377)), closes [#268](https://github.com/1StepMore/AutoMedia/issues/268)
+
+## [1.10.0](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.9.1...automedia-v1.10.0) (2026-10-23)
+
+
+### Features
+
+* **project:** pull standard video asset pack on init ([#265](https://github.com/1StepMore/AutoMedia/issues/265)) ([acd48ac](https://github.com/1StepMore/AutoMedia/commit/acd48ac17963afcdd9986073da9d3977a4d7d6f8))
+
+## [1.9.1](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.9.0...automedia-v1.9.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **changelog:** restore the 1.9.0 section to the commits it actually shipped ([#258](https://github.com/1StepMore/AutoMedia/issues/258)) ([b4eb081](https://github.com/1StepMore/AutoMedia/commit/b4eb08165459414c20cd2f615d3cb2396dcc5f8a))
+* **gates:** make the engine verdict an aggregate, not a latch ([6337484](https://github.com/1StepMore/AutoMedia/commit/6337484f93e21924ce722d5c328fd1e7e11f2b4e))
+* **slug:** cap Latin-only slugs so long topics stay creatable ([#264](https://github.com/1StepMore/AutoMedia/issues/264)) ([5370cb1](https://github.com/1StepMore/AutoMedia/commit/5370cb18bfd594ddd563110f9478cf859fbea731)), closes [#263](https://github.com/1StepMore/AutoMedia/issues/263)
+* **slug:** 中英混排 topic 保留中文段，避免不同 topic 撞同一目录（[#256](https://github.com/1StepMore/AutoMedia/issues/256)） ([#257](https://github.com/1StepMore/AutoMedia/issues/257)) ([e73925a](https://github.com/1StepMore/AutoMedia/commit/e73925a3eba98eb1ba579424ed1dc41290531763))
+
+## [1.9.0](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.15...automedia-v1.9.0) (2026-10-21)
+
+
+### Bug Fixes
+
+* **deps:** bump Pillow to 13 for pip-audit ([#254](https://github.com/1StepMore/AutoMedia/issues/254)) ([9b2dbcc](https://github.com/1StepMore/AutoMedia/commit/9b2dbccb61f721f305a7eb0fae7b1674a21a23ad))
+
+
+### Dependencies
+
+* **deps:** bump aiohttp from 3.14.3 to 3.14.4 ([#250](https://github.com/1StepMore/AutoMedia/issues/250)) ([3f0fcfd](https://github.com/1StepMore/AutoMedia/commit/3f0fcfd22fb9f2f6e3fbf483e42e16a34b7cc12d))
+* **deps:** bump bridgecrewio/checkov-action ([#241](https://github.com/1StepMore/AutoMedia/issues/241)) ([1660b8e](https://github.com/1StepMore/AutoMedia/commit/1660b8e8853d295608d55b45f57221b33ce1e254))
+* **deps:** bump certifi from 2026.6.17 to 2026.10.19 ([#252](https://github.com/1StepMore/AutoMedia/issues/252)) ([1e20a6e](https://github.com/1StepMore/AutoMedia/commit/1e20a6edffbf54d690964b46cb57b41c2b758b1e))
+
 ## [1.8.15](https://github.com/1StepMore/AutoMedia/compare/automedia-v1.8.14...automedia-v1.8.15) (2026-10-19)
 
 

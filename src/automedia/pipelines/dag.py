@@ -1,6 +1,9 @@
-"""Canonical gate DAG for the AutoMedia pipeline.
+"""Gate dependency graph for the AutoMedia pipeline.
 
-Part of the graph-engineering-rollout Wave 1 (P0 equivalence layer).
+The AUTHORITY for gate ORDER is :mod:`automedia.pipelines.gate_plan`; this
+module describes the dependency EDGES among the same gates.  A test asserts
+the topological order of every mode's gate subset reproduces the plan's list
+exactly, so "canonical" is a verified claim rather than a label (issue #282).
 
 This module is a pure, declarative description of the pipeline's gate
 dependency graph: ``AUTO_GATE_DAG`` maps every gate name to a ``GateNode``
@@ -9,17 +12,30 @@ helpers operate on it:
 
 - ``topological_order`` — topologically orders a mode-scoped gate-name list
   (``present-parents`` semantics: parents outside the mode subset are ignored).
-  For every mode in ``automedia.pipelines.runner._MODE_MAP`` this reproduces
-  the existing linear gate-name list byte-exact, proving the DAG is a drop-in
-  replacement for the hardcoded mode lists.
+  For every mode in :data:`automedia.pipelines.gate_plan.MODE_GATE_NAMES` this
+  reproduces the plan's linear gate-name list byte-exact.
 - ``downstream`` — the reverse-topological closure of a gate: every gate that
   transitively depends on it, ordered dependencies-before-dependents.
 
+DECLARATION ORDER IS SEMANTIC (pinned). ``AUTO_GATE_DAG``'s insertion order
+is the canonical gate order — ``topological_order`` uses it as its tie-break,
+so two ready gates always resolve the same way and a shuffled caller input
+cannot change the result.  That means REORDERING THE DICT IS A BEHAVIOUR
+CHANGE, which is exactly why it is not left implicit:
+
+* :data:`GATE_ORDER` materialises the order as data, so it can be asserted;
+* ``tests/test_runner/test_dag.py`` pins the literal 26-name sequence, so a
+  reorder fails a test instead of silently changing pipeline behaviour;
+* every edge must point at a gate declared EARLIER (a test enforces it), which
+  is what makes the insertion order a valid topological order by construction.
+
 Import-isolation contract (Metis G7): this module must NOT import anything
-from ``automedia.pipelines.runner`` (or any other ``automedia`` subpackage) —
-it is a standalone declarative layer. The ``failure_mode`` strings are literal
-values mirrored from the registered gate classes; tests verify they agree with
-the registry.
+from ``automedia.pipelines.runner`` — a fresh interpreter importing only
+``dag`` must not load the runner.  The only ``automedia`` import permitted is
+``gate_plan``, which itself imports nothing from ``automedia``.
+
+The ``failure_mode`` strings are literal values mirrored from the registered
+gate classes; tests verify they agree with the registry.
 """
 
 from __future__ import annotations
@@ -51,10 +67,14 @@ class GateNode:
 # ---------------------------------------------------------------------------
 # Canonical gate DAG
 #
-# Dict insertion order is the canonical gate order: pre-gate → CW → copy track
-# (G0..G6) + video track (V0..V7) → H0 → lifecycle track (L1..L4) → repurpose
-# track (P1..P4). Every edge respects this order, so filtering it to any
-# subset yields a valid topological order of that subset.
+# INSERTION ORDER IS THE CANONICAL GATE ORDER (see the module docstring): pre-gate
+# → CW → copy track (G0..G6) + video track (V0..V7) → H0 → lifecycle track
+# (L1..L4) → repurpose track (P1..P4).  Every edge points at an earlier gate, so
+# filtering this order to any subset yields a valid topological order of that
+# subset — and ``topological_order`` uses it as its tie-break.
+#
+# Reordering these lines changes pipeline behaviour.  GATE_ORDER below pins the
+# sequence so that cannot happen silently.
 # ---------------------------------------------------------------------------
 
 AUTO_GATE_DAG: dict[str, GateNode] = {
@@ -66,7 +86,7 @@ AUTO_GATE_DAG: dict[str, GateNode] = {
     "G3": GateNode(name="G3", track="copy", depends_on=("G2",), failure_mode="stop"),
     "G4": GateNode(name="G4", track="copy", depends_on=("G3",), failure_mode="stop"),
     "G5": GateNode(name="G5", track="copy", depends_on=("G4",), failure_mode="stop"),
-    "G6": GateNode(name="G6", track="copy", depends_on=("G5",), failure_mode="retry"),
+    "G6": GateNode(name="G6", track="copy", depends_on=("G3",), failure_mode="retry"),
     "V0": GateNode(
         name="V0",
         track="video",
@@ -91,11 +111,61 @@ AUTO_GATE_DAG: dict[str, GateNode] = {
     "L2": GateNode(name="L2", track="lifecycle", depends_on=("L1",), failure_mode="stop"),
     "L3": GateNode(name="L3", track="lifecycle", depends_on=("L2",), failure_mode="stop"),
     "L4": GateNode(name="L4", track="lifecycle", depends_on=("L3",), failure_mode="stop"),
-    "P1": GateNode(name="P1", track="qa", depends_on=("L4",), failure_mode="retry"),
+    "P1": GateNode(name="P1", track="qa", depends_on=("H0",), failure_mode="retry"),
     "P2": GateNode(name="P2", track="qa", depends_on=("P1",), failure_mode="retry"),
     "P3": GateNode(name="P3", track="qa", depends_on=("P2",), failure_mode="retry"),
     "P4": GateNode(name="P4", track="qa", depends_on=("P3",), failure_mode="retry"),
 }
+
+#: The canonical gate order, as an explicit tuple.
+#:
+#: This is ``AUTO_GATE_DAG``'s insertion order materialised as data.  It exists
+#: because that order is SEMANTIC (``topological_order`` tie-breaks on it) and
+#: a semantic ordering that only lives in dict insertion order is one careless
+#: edit away from a silent behaviour change.
+#:
+#: A test pins this exact sequence.  Do NOT edit it to match a reordered dict —
+#: if the pipeline order genuinely changes, the gate plan (``MODE_GATE_NAMES``)
+#: changes first and this tuple follows with its test updated deliberately.
+GATE_ORDER: tuple[str, ...] = tuple(AUTO_GATE_DAG)
+
+
+def _validate_declaration_order() -> None:
+    """Fail at import if the DAG contradicts its own declaration order.
+
+    Two invariants make declaration order a usable tie-break:
+
+    1. :data:`GATE_ORDER` covers exactly the DAG's keys (no drift);
+    2. every ``depends_on`` parent is declared EARLIER than its dependent —
+       which is what makes "filter the declaration order to a subset" a valid
+       topological order rather than an accident.
+
+    Checked here, not only in tests, because ``dag`` is a leaf module with no
+    side effects: a contradiction is a programming error that should never
+    survive to runtime, and an import-time check cannot be skipped by a caller
+    that does not run the suite.
+    """
+    position = {name: index for index, name in enumerate(GATE_ORDER)}
+    if set(position) != set(AUTO_GATE_DAG):
+        raise RuntimeError(
+            "GATE_ORDER drifted from AUTO_GATE_DAG: "
+            f"missing={sorted(set(AUTO_GATE_DAG) - set(position))} "
+            f"extra={sorted(set(position) - set(AUTO_GATE_DAG))}"
+        )
+    for name, node in AUTO_GATE_DAG.items():
+        for parent in node.depends_on:
+            if parent not in position:
+                raise RuntimeError(f"{name} depends on unknown gate {parent!r}")
+            if position[parent] > position[name]:
+                raise RuntimeError(
+                    f"{name} (position {position[name]}) depends on {parent} "
+                    f"(position {position[parent]}), which is declared LATER — "
+                    "declaration order is the topological tie-break, so an edge "
+                    "must point backwards"
+                )
+
+
+_validate_declaration_order()
 
 
 def topological_order(dag: dict[str, GateNode], mode_gates: list[str]) -> list[str]:
@@ -105,18 +175,31 @@ def topological_order(dag: dict[str, GateNode], mode_gates: list[str]) -> list[s
     every parent in ``depends_on`` that is ALSO in ``mode_gates`` has already
     been emitted; parents outside the mode subset are ignored ("present-parents
     semantics" — this is what lets ``qa_only``/``text_only`` run without
-    pre-gate/CW). Among ready gates, emit in ``mode_gates`` order, which
-    reproduces the runner's existing linear lists byte-exact for every mode.
+    pre-gate/CW).
+
+    TIE-BREAK: among ready gates, emit in **``dag`` declaration order**, not in
+    the caller's order.  This is what makes the result a property of the graph
+    rather than of the input list:
+
+    * With the old input-order tie-break, a mode's declared list was the only
+      thing that ever produced the expected answer, so "topological_order
+      reproduces the plan" was true by construction and proved nothing.  Worse,
+      a shuffled input could legally emit ``G6`` before ``CW`` (``G6``'s parent
+      ``G5`` is in no preset, so it looked ready) — a valid topological order
+      that would make G6 check content CW had not written yet.
+    * With declaration order, any input permutation of the same gate set yields
+      the same output, and that output is exactly the canonical gate order.
 
     Raises:
         ValueError: If a cycle or an unsatisfiable dependency leaves gates
             un-emittable.
     """
+    canonical = [name for name in dag if name in set(mode_gates)]
     emitted: list[str] = []
-    remaining: list[str] = [g for g in mode_gates if g in dag]
+    remaining: list[str] = list(canonical)
     while remaining:
         progress = False
-        for gate in list(remaining):  # iterate in mode_gates order
+        for gate in list(remaining):
             parents = dag[gate].depends_on
             if all(p not in mode_gates or p in emitted for p in parents):
                 emitted.append(gate)
@@ -157,3 +240,12 @@ def downstream(dag: dict[str, GateNode], gate: str) -> list[str]:
 
     # Canonical order filtered to the reachable set = valid topological order.
     return [name for name in dag if name in reachable]
+
+
+__all__ = [
+    "AUTO_GATE_DAG",
+    "GATE_ORDER",
+    "GateNode",
+    "downstream",
+    "topological_order",
+]
