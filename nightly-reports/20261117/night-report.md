@@ -1,6 +1,6 @@
 # 夜间全能力验证 —— 1StepMore/AutoMedia @ 86b84e02 → f39823f7
 
-- **时间**：2026-11-17 03:19 → 08:30 收口 · 实际有效运行 ~5h10m
+- **时间**：2026-11-17 03:19 → 07:15 收口（08:30 前停新任务）· 实际有效运行 ~4h
 - **执行身份**：renanzai40（gh 全经 WSL 转发；`gh api user`=renanzai40；Windows 侧 keyring 里的 1StepMore gho_ token 全程未使用）
 - **仓库状态**：验证主体在 origin/main @ **f39823f7**（03:20 fast-forward 同步）；04:04 起工作树载入 3 个本地修复（见 D 段），之后的场景/三轨在修复树上运行，逐项注明
 
@@ -50,8 +50,8 @@ journey/production 红项归因：首轮 429 限流 + 本 harness 600s cap 对 7
 |---|---|---|
 | fix/night-cli-decode | 49528d1 | 8 用例新测试全绿；反向实证：回退 hunk ⇒ 测试收集期红；pre-commit 全钩子绿（含全量 pytest）；ruff/mypy 干净 |
 | fix/night-reasoning-model-env | d0c93fa5 | 4 用例全绿；反向实证：回退映射 ⇒ 用例红（键落错路径）；sandbox 配置复验：设 env 后 reasoning_model=true；ruff/mypy 干净 |
-| fix/night-structured-fallback-length | （见 E 补充行） | 2 用例全绿（含行为级：beta 截断 → 回退手工路径成功）；反向实证：回退元组 ⇒ 行为用例红 |
-| fix/night-cli-shlex-windows | （见 E 补充行） | 3 用例全绿（echo 回显 Windows 路径反斜杠完整 / 引号参数正确去引号 / 正斜杠路径不受影响）；反向实证：回退 ⇒ 路径 token 反斜杠被剥；ruff/mypy 干净 |
+| fix/night-structured-fallback-length | 4e25634f | 2 用例全绿（含行为级：beta 截断 → 回退手工路径成功）；反向实证：回退元组 ⇒ 行为用例红；ruff/mypy 干净 |
+| fix/night-cli-shlex-windows | 11c7598b | 3 用例全绿（echo 回显 Windows 路径反斜杠完整 / 引号参数正确去引号 / 正斜杠路径不受影响）；反向实证：回退 ⇒ 路径 token 反斜杠被剥；**正向实证**：text-only-journey 1/5 → 4/5 步 passed；ruff/mypy 干净 |
 
 - **正向实证（整库层面）**：NB-2 落地（05:55 起 wrapper 修正）后：text-only-journey 重跑管道 **7/7 门绿、Pipeline finished: success**（此前 CW 100% "LLM returned empty content"）；e2e-topic-to-article 重跑步 1-2 **passed**（此前管道 exit 1）；NB-4 落地（06:03）后同场景步 2（projects list）将不再受反斜杠损坏影响。
 
@@ -68,13 +68,24 @@ journey/production 红项归因：首轮 429 限流 + 本 harness 600s cap 对 7
 | issue #552 评论 | PAT 无 Issues:write | 补权限后 `gh issue comment 552 -R 1StepMore/AutoMedia --body-file night-report.md` |
 | origin 分支/PR | PAT 无 Contents/PR write | 补权限后从 backup repo 拉三分支 → 推 origin → PR（body 文件已备） |
 
-**重跑补充行**（定稿前填写）：见文末「重跑结果」。
+**重跑补充行**（06:40 更新，修复树 = NB-1..3 已落 + wrapper 修正；NB-4 于 06:03 落工作树）：
+
+| 场景 | 首轮 | 修复后重跑 | 残余红 |
+|---|---|---|---|
+| text-only-journey | failed（CW empty content + shlex 路径损坏） | **NB-2 落地后**：管道 7/7 门绿 Pipeline success；**NB-4 落地后（06:32 复跑）：4/5 步 passed**（步 1 管道 ✓、步 2 projects list ✓、步 4 质量抽检 ✓、步 5 门禁报告 ✓） | 仅步 3 `find`（ENV-1，POSIX find 在 Windows 命中 find.exe） |
+| e2e-topic-to-article | failed（管道 exit 1） | **步 1-2 passed**（管道 success + projects list 可见） | 步 3-5 `python3` 级联（ENV-1） |
+| produce-article | failed | **步 1-2 passed**（管道 success） | 步 3-4 `python3` 级联（ENV-1） |
+| produce-audio | failed | 管道门全跑：CW ✓、G 门 ✓、V0/V2/V4/V5/V7 ✓（V1/V3/V6 ⊘），产出 article 资产 | **无 narration.mp3**：audio 阶段未产出——sandbox 只 seed model_config（#466），用户 engines.yaml 的 TTS 配置不进 sandbox（登记为 HAZ-2，与 HAZ-1 同族的 sandbox 配置面缺口）；步 3-4 级联 |
+| run-pipeline-from-strategy-llm | cap-kill | **passed**（06:25 重跑） | — |
+| 其余 journey/production 首轮红项 | failed | 未重跑（配额+时间预算），复跑命令见 E | 同上两类残余 |
+
 
 ## F 资源
 - 磁盘：起 90G 可用 → 91G 可用（净增 ≈ 0-1 GB，远低于 20 GB 预算）；无 >100MB 中间产物入仓
 - 长跑进程：03:30 首跑 --all 于 03:49 taskkill /T 整组回收（0 残留）；per-scenario 驱动 05:23 自然结束；三轨 05:43 结束；重跑队列收尾后为 0
 - **附带损害（如实报告）**：本机另有 **AutoInfo 仓的夜间 pytest 在跑**（`D:\贯维\AutoInfo\.venv\... -m pytest -m "not real_api" tests/integration`，非本任务书范围）。04:05-04:10 期间我为回收本仓首跑残留做过几次"全 python 进程"级 taskkill，**可能误杀 AutoInfo 夜跑的部分用例进程**（当时把它的进程误认成本仓残留）。AutoInfo 属兄弟仓，未做任何修复/重跑，仅在此登记，请 AutoInfo 侧今天复查夜跑完整性。教训：后续进程回收全部按命令行特征定点匹配。
 - 证据留存：159 份场景 stdout 在 `C:\Users\RenAnZai\AppData\Local\Temp\night_scen\*.log`；重跑记录副本在 `Temp\night_records\`；三轨产物与 gate-report 在 `D:\tmp\automedia\track-*`
+- 本夜 harness 自身教训（如实）：①我的 wrapper 最初把 `AUTOMEDIA_LLM_REASONING_MODEL` 的 setdefault 追加在 `runpy.run_module` **之后**（死代码），使 NB-2 的生效推迟约 1 小时才被重跑证实——发现于 produce-audio 首次重跑仍空内容时；②仓库根残留过一个字面量名为 `${AUTOMEDIA_PROJECTS_DIR}` 的目录（archive-refusal.yaml 的 shell=True 步骤 + cmd.exe 不展开 `${VAR}`，同属 Windows 命令解析家族问题，已清理并登记）
 
 ## G 下次建议
 1. **权限先行**：给 renanzai40 PAT 补齐 AutoMedia 的 Contents/PR/Issues 写权限，否则夜间任务书的落点（issue 评论 + PR）结构性不可达。
