@@ -76,6 +76,25 @@ def _plain(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
+def _tolerant_decode(raw: bytes | bytearray | str | None) -> str:
+    """Decode subprocess output without dying on mixed-encoding children.
+
+    Order: UTF-8 (the repo's canonical output encoding), then GBK/cp936
+    (Windows native console tools), then UTF-8 with replacement — a decode
+    failure must never lose the captured bytes outright.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    for encoding in ("utf-8", "gbk"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 @dataclass
 class StepResult:
     """What every adapter hands back (guide §3.2)."""
@@ -242,10 +261,8 @@ class CLIAdapter:
             # propagate the isinstance narrowing into a call argument written
             # as a ternary, so ``_plain(x) if isinstance(x, str) else ""``
             # trips its ``bytes | None`` stub for TimeoutExpired.stdout.
-            raw_stdout = exc.stdout
-            raw_stderr = exc.stderr
-            stdout_text = raw_stdout if isinstance(raw_stdout, str) else ""
-            stderr_text = raw_stderr if isinstance(raw_stderr, str) else ""
+            stdout_text = _tolerant_decode(exc.stdout)
+            stderr_text = _tolerant_decode(exc.stderr)
             return StepResult(
                 False,
                 {
@@ -281,14 +298,26 @@ class CLIAdapter:
     def _run_process(
         parts: str | list[str], timeout: float, shell: bool
     ) -> subprocess.CompletedProcess[str]:
-        """The single subprocess choke point (trusted scenario commands)."""
-        return subprocess.run(  # noqa: S603 — trusted committed scenario config
+        """The single subprocess choke point (trusted scenario commands).
+
+        Captures bytes and decodes tolerantly (utf-8, then GBK, then
+        replacement) instead of ``text=True``: a native Windows child whose
+        console output is GBK (cp936) crashed the ``subprocess`` reader
+        thread under strict UTF-8 decoding, silently losing the step's
+        stdout/stderr (#night-20261117).
+        """
+        proc = subprocess.run(  # noqa: S603 — trusted committed scenario config
             parts,
             capture_output=True,
-            text=True,
             timeout=timeout,
             shell=shell,  # nosec B602 — trusted committed scenario config
             check=False,
+        )
+        return subprocess.CompletedProcess(
+            proc.args,
+            proc.returncode,
+            stdout=_tolerant_decode(proc.stdout),
+            stderr=_tolerant_decode(proc.stderr),
         )
 
 
