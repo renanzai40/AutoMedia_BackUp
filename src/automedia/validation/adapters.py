@@ -36,6 +36,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -227,14 +228,24 @@ class CLIAdapter:
             return StepResult(False, {"success": False, "error": "cli step without a command"})
         timeout = step.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
         expanded = os.path.expandvars(command)
+        # POSIX shlex rules eat backslashes, which corrupts every expanded
+        # Windows path (C:\Users\... -> C:UsersRenAnZai...): keep them intact
+        # by splitting without posix escaping on Windows, then dequote simple
+        # surrounding quotes that posix=False leaves in place (#night-20261117).
+        posix_split = sys.platform != "win32"
         parts: str | list[str]
         try:
-            parts = shlex.split(expanded)
+            parts = shlex.split(expanded, posix=posix_split)
         except ValueError:
             parts = command
             shell = True
         else:
             shell = False
+            if not posix_split and isinstance(parts, list):
+                parts = [
+                    p[1:-1] if len(p) >= 2 and p[0] == p[-1] and p[0] in ('"', "'") else p
+                    for p in parts
+                ]
         try:
             proc = self._run_process(parts, timeout, shell)
         except subprocess.TimeoutExpired as exc:
